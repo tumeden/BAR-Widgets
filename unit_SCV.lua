@@ -5,7 +5,7 @@ function widget:GetInfo()
     desc      = "Collects resources, and heals injured units.",
     author    = "Tumeden",
     date      = "2024",
-    version   = "v4.0",
+    version   = "v4.1",
     license   = "GNU GPL, v2 or later",
     layer     = 0,
     enabled   = true
@@ -26,7 +26,6 @@ local maxUnitsPerFeature = 4  -- Maximum units allowed to target the same featur
 local healingTargets = {}  -- Track which units are being healed and by how many healers
 local maxHealersPerUnit = 4  -- Maximum number of healers per unit
 local unitTaskStatus = {}
-
 local spGetUnitDefID = Spring.GetUnitDefID
 local spGiveOrderToUnit = Spring.GiveOrderToUnit
 local spGetUnitPosition = Spring.GetUnitPosition
@@ -36,19 +35,14 @@ local spGetMyTeamID = Spring.GetMyTeamID
 local spGetTeamResources = Spring.GetTeamResources
 local CMD_RECLAIM = CMD.RECLAIM
 local maxUnits = 1000000
-
+local avoidanceCooldown = 30 -- Cooldown in game frames, 30 Default.
 
 -- ///////////////////////////////////////////  Adjustable variables, to suit the widget users preference
-
-local retreatRadius = 800  -- The detection area around the SCV unit, which causes it to retreat.
-local enemyAvoidanceRadius = 725  -- Adjust this value as needed -- Define a safe distance for enemy avoidance
-local avoidanceCooldown = 30 -- Cooldown in game frames
 local healResurrectRadius = 4000 -- Set your desired heal/resurrect radius here
 local reclaimRadius = 4000 -- Set your desired reclaim radius here
+local retreatRadius = 800  -- The detection area around the SCV unit, which causes it to retreat.
+local enemyAvoidanceRadius = 725  -- Adjust this value as needed -- Define a safe distance for enemy avoidance
 local closeHealingThreshold = 300 -- Units within this range will prioritize healing
-
-
-
 
 
 -- /////////////////////////////////////////// ---- /////////////////////////////////////////// ---- /////////////////////////////////////////// 
@@ -154,7 +148,7 @@ function widget:GameFrame(currentFrame)
   -- Interval for checking stuck units
   local stuckCheckInterval = 500  -- Number of game frames to wait between checks
 
-  -- Interval for retreat and other actions
+  -- Interval for avoidance and other actions
   local actionInterval = 60  -- Check every 60 frames (approximately 2 seconds at 30 FPS)
 
   if currentFrame % stuckCheckInterval == 0 then
@@ -170,13 +164,9 @@ function widget:GameFrame(currentFrame)
 
   if currentFrame % actionInterval == 0 then
     if widgetEnabled then
-      retreatUnits(unitsToCollect, retreatRadius)
-
-      for unitID, unitData in pairs(unitsToCollect) do
-        local x, _, z = spGetUnitPosition(unitID)
-        local featureID = unitData.featureID
-        -- Call checkAndRetreatIfNeeded for each unit
-        checkAndRetreatIfNeeded(unitID, {x = x, z = z}, retreatRadius)
+      -- Replace retreatUnits with checkAndRetreatIfNeeded for each unit
+      for unitID, _ in pairs(unitsToCollect) do
+        checkAndRetreatIfNeeded(unitID, retreatRadius)
       end
 
       if not unitsToCollect then
@@ -191,27 +181,39 @@ end
 
 
 
-
-
 -- ///////////////////////////////////////////  avoidEnemy Function
--- Implement a function to handle enemy avoidance
 function avoidEnemy(unitID, enemyID)
+  local currentTime = Spring.GetGameFrame()
+
+  -- Check if the unit is still in cooldown period
+  if lastAvoidanceTime[unitID] and (currentTime - lastAvoidanceTime[unitID]) < avoidanceCooldown then
+    return -- Skip avoidance if still in cooldown
+  end
+
   local ux, uy, uz = spGetUnitPosition(unitID)
   local ex, ey, ez = spGetUnitPosition(enemyID)
 
   -- Calculate a direction vector away from the enemy
   local dx, dz = ux - ex, uz - ez
   local magnitude = math.sqrt(dx * dx + dz * dz)
-  local safeDistance = enemyAvoidanceRadius * 1.2  -- 2 by default, Twice the avoidance radius
+
+  -- Adjusted safe distance calculation
+  local safeDistanceMultiplier = 0.5  -- Retreat half the distance of the avoidance radius
+  local safeDistance = enemyAvoidanceRadius * safeDistanceMultiplier
 
   -- Calculate a safe destination
   local safeX = ux + (dx / magnitude * safeDistance)
   local safeZ = uz + (dz / magnitude * safeDistance)
   local safeY = Spring.GetGroundHeight(safeX, safeZ)
 
-  -- Issue a move command to the safe destination
+  -- Issue a move order to the safe destination
   spGiveOrderToUnit(unitID, CMD.MOVE, {safeX, safeY, safeZ}, {})
+
+  -- Update the last avoidance time for this unit
+  lastAvoidanceTime[unitID] = currentTime
 end
+
+
 
 -- ///////////////////////////////////////////  processUnits Function
 function processUnits(units)
@@ -286,12 +288,6 @@ end
 
 
 
-
-
-
-
-
-
 -- /////////////////////////////////////////// findReclaimableFeature Function
 function findReclaimableFeature(unitID, x, z, searchRadius, resourceNeed)
   local featuresInRadius = spGetFeaturesInCylinder(x, z, searchRadius)
@@ -334,11 +330,6 @@ function calculateResourceScore(featureMetal, featureEnergy, distance, resourceN
 
   return score
 end
-
-
-
-
-
 
 
 
@@ -416,50 +407,6 @@ function findNearestEnemy(unitID, searchRadius)
 end
 
 
--- ///////////////////////////////////////////  retreatingUnits Function
-function retreatUnits(units, retreatRadius)
-  local adjustedRetreatFraction = 0.2  -- Units will retreat % of the retreatRadius
-
-  for unitID, _ in pairs(units) do
-    local unitDefID = spGetUnitDefID(unitID)
-    local unitDef = UnitDefs[unitDefID]
-
-    -- Check if the unit has the required abilities
-    if unitDef ~= nil and unitDef.canReclaim and unitDef.canResurrect then
-      local nearestEnemy, distance, isAirUnit = findNearestEnemy(unitID, retreatRadius * adjustedRetreatFraction)
-
-      if nearestEnemy and distance < retreatRadius then
-        -- Adjust the retreat logic if the nearest enemy is an air unit
-        local adjustedRetreatRadius = retreatRadius
-        if isAirUnit then
-          -- Example: Reduce the retreat radius by half for air units
-          adjustedRetreatRadius = retreatRadius * 0.2
-        end
-
-        -- Calculate a retreat direction opposite to the nearest enemy
-        local x, y, z = spGetUnitPosition(unitID)
-        local ex, ey, ez = spGetUnitPosition(nearestEnemy)
-        local dx, dz = x - ex, z - ez
-        local length = math.sqrt(dx * dx + dz * dz)
-        local retreatDist = adjustedRetreatRadius * adjustedRetreatFraction
-        local rx, rz = x + dx / length * retreatDist, z + dz / length * retreatDist
-        local ry = Spring.GetGroundHeight(rx, rz)
-
-        -- Issue a move order to the retreat position
-        spGiveOrderToUnit(unitID, CMD.MOVE, {rx, ry, rz}, {})
-
-        -- Add the unit to the retreatingUnits table
-        retreatingUnits[unitID] = true
-
-        -- Remove the unit from the unitsToCollect table so it doesn't collect resources while retreating
-        unitsToCollect[unitID] = nil
-      end
-    end
-  end
-end
-
-
-
 -- ///////////////////////////////////////////  ressurectNearbyDeadUnits Function
   function resurrectNearbyDeadUnits(unitID, healResurrectRadius)
     local x, y, z = spGetUnitPosition(unitID)
@@ -476,14 +423,15 @@ end
   end
 
 -- ///////////////////////////////////////////  checkAndRetreatIfNeeded Function
-function checkAndRetreatIfNeeded(unitID, units, retreatRadius)
+function checkAndRetreatIfNeeded(unitID, retreatRadius)
   local nearestEnemy, distance = findNearestEnemy(unitID, retreatRadius)
 
   if nearestEnemy and distance < retreatRadius then
-    -- Unit needs to retreat, process retreat
-    retreatUnits({[unitID] = units[unitID]}, retreatRadius)
+    -- Process avoidance and retreat in a unified manner
+    avoidEnemy(unitID, nearestEnemy, distance)
   end
 end
+
 
 
 -- ///////////////////////////////////////////  UnitIdle Function
@@ -515,10 +463,6 @@ function widget:UnitIdle(unitID)
     healingUnits[unitID] = nil
   end
 end
-
-
-
-
 
 
 
@@ -566,25 +510,6 @@ function handleStuckUnits(unitID, unitDef)
   end
 end
 
-
-
-
--- ///////////////////////////////////////////  optimizeResourceCollection Function
-function optimizeResourceCollection(unitID, unitDef)
-  local resourcePriority = assessResourceNeeds()
-  if resourcePriority then
-    -- Assign tasks based on resource priority
-    -- For example, focus on collecting metal or energy depending on the current need
-  end
-end
-
--- ///////////////////////////////////////////  reassessUnitTask Function
-function reassessUnitTask(unitID, unitDef)
-  -- Logic to determine if the current task is still relevant
-  -- Reassign task if necessary
-end
-
-
 -- ///////////////////////////////////////////  assessResourceNeeds Function
 function assessResourceNeeds()
   local myTeamID = Spring.GetMyTeamID()
@@ -609,35 +534,4 @@ function getFeatureResources(featureID)
   local featureDefID = spGetFeatureDefID(featureID)
   local featureDef = FeatureDefs[featureDefID]
   return featureDef.metal, featureDef.energy
-end
-
-
-
--- ///////////////////////////////////////////  avoidEnemy Function
-function avoidEnemy(unitID, enemyID)
-  local currentTime = Spring.GetGameFrame()
-
-  -- Check if the unit is still in cooldown period
-  if lastAvoidanceTime[unitID] and (currentTime - lastAvoidanceTime[unitID]) < avoidanceCooldown then
-    return -- Skip avoidance if still in cooldown
-  end
-
-  local ux, uy, uz = spGetUnitPosition(unitID)
-  local ex, ey, ez = spGetUnitPosition(enemyID)
-
-  -- Calculate a direction vector away from the enemy
-  local dx, dz = ux - ex, uz - ez
-  local magnitude = math.sqrt(dx * dx + dz * dz)
-  local safeDistance = enemyAvoidanceRadius * 2  -- Twice the avoidance radius
-
-  -- Calculate a safe destination
-  local safeX = ux + (dx / magnitude * safeDistance)
-  local safeZ = uz + (dz / magnitude * safeDistance)
-  local safeY = Spring.GetGroundHeight(safeX, safeZ)
-
-  -- Issue a move command to the safe destination
-  spGiveOrderToUnit(unitID, CMD.MOVE, {safeX, safeY, safeZ}, {})
-
-  -- Update the last avoidance time for this unit
-  lastAvoidanceTime[unitID] = currentTime
 end
