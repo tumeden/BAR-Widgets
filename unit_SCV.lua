@@ -41,7 +41,7 @@ local avoidanceCooldown = 30 -- Cooldown in game frames, 30 Default.
 local healResurrectRadius = 4000 -- Set your desired heal/resurrect radius here
 local reclaimRadius = 4000 -- Set your desired reclaim radius here
 local retreatRadius = 800  -- The detection area around the SCV unit, which causes it to retreat.
-local enemyAvoidanceRadius = 625  -- Adjust this value as needed -- Define a safe distance for enemy avoidance
+local enemyAvoidanceRadius = 675  -- Adjust this value as needed -- Define a safe distance for enemy avoidance
 local closeHealingThreshold = 300 -- Units within this range will prioritize healing
 
 
