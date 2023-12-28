@@ -197,7 +197,7 @@ end
 -- /////////////////////////////////////////// GameFrame Function
 function widget:GameFrame(currentFrame)
   -- Interval for checking stuck units
-  local stuckCheckInterval = 500  -- Number of game frames to wait between checks
+  local stuckCheckInterval = 5000  -- Number of game frames to wait between checks
 
   -- Interval for avoidance and other actions
   local actionInterval = 60  -- Check every 60 frames (approximately 2 seconds at 30 FPS)
@@ -528,7 +528,7 @@ end
 
 -- ///////////////////////////////////////////  isUnitStuck Function
 local lastStuckCheck = {}
-local checkInterval = 30  -- Number of game frames to wait between checks
+local checkInterval = 1000  -- Number of game frames to wait between checks
 
 function isUnitStuck(unitID)
   local currentFrame = Spring.GetGameFrame()
