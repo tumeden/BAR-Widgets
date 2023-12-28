@@ -2,7 +2,7 @@
 function widget:GetInfo()
   return {
     name      = "SCV",
-    desc      = "Collects resources, and heals injured units.",
+    desc      = "RezBots Resurrect, Collect resources, and heal injured units.",
     author    = "Tumeden",
     date      = "2024",
     version   = "v4.6",
@@ -15,12 +15,11 @@ end
 
 -- ///////////////////////////////////////////  Adjustable variables, to suit the widget users preference
 
-local healResurrectRadius = 1000 -- Set your desired heal/resurrect radius here
-local reclaimRadius = 4000 -- Set your desired reclaim radius here
+local healResurrectRadius = 1000 -- Set your desired heal/resurrect radius here  (default 1000,  anything larger will cause significant lag)
+local reclaimRadius = 4000 -- Set your desired reclaim radius here (any number works, 4000 is about half a large map)
 local retreatRadius = 800  -- The detection area around the SCV unit, which causes it to retreat.
 local enemyAvoidanceRadius = 675  -- Adjust this value as needed -- Define a safe distance for enemy avoidance
 local closeHealingThreshold = 300 -- Units within this range will prioritize healing
-
 
 
 
@@ -100,6 +99,13 @@ local mathFloor = math.floor
 
 -- /////////////////////////////////////////// Initialize Function
 function widget:Initialize()
+  
+  local isSpectator = Spring.GetSpectatingState()
+  if isSpectator then
+    Spring.Echo("You are a spectator. Widget is disabled.")
+    widgetHandler:RemoveWidget(self)
+    return
+  end
   -- Define rezbots unit definition IDs
   local armRectrDefID, corNecroDefID
 
