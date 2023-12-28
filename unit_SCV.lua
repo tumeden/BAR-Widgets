@@ -32,6 +32,8 @@ local closeHealingThreshold = 300 -- Units within this range will prioritize hea
 
 -- /////////////////////////////////////////// Important things :))
 local widgetEnabled = true
+local optimizedPathsCache = {}
+local resurrectionCache = {}
 local resurrectingUnits = {}  -- table to keep track of units currently resurrecting
 local unitsToCollect = {}  -- table to keep track of units and their collection state
 local lastAvoidanceTime = {} -- Table to track the last avoidance time for each unit
@@ -481,19 +483,32 @@ end
 
 
 -- ///////////////////////////////////////////  ressurectNearbyDeadUnits Function
-  function resurrectNearbyDeadUnits(unitID, healResurrectRadius)
-    local x, y, z = spGetUnitPosition(unitID)
-    local deadUnits = Spring.GetUnitsInCylinder(x, z, healResurrectRadius, Spring.DECAYED)
-  
-    for _, deadUnitID in ipairs(deadUnits) do
-      local unitDefID = spGetUnitDefID(deadUnitID)
-      local unitDef = UnitDefs[unitDefID]
-  
-      if unitDef ~= nil and unitDef.canReclaim and unitDef.canResurrect then
-        Spring.GiveOrderToUnit(unitID, CMD.RESURRECT, { deadUnitID }, {})
-      end
+local resurrectionCacheTimeout = 30 * 60  -- Cache timeout in game frames (e.g., 30 seconds at 60 fps)
+
+function resurrectNearbyDeadUnits(unitID, healResurrectRadius)
+    local cache = resurrectionCache[unitID]
+    local currentFrame = Spring.GetGameFrame()
+
+    -- Check if cache is valid
+    if cache and (currentFrame - cache.lastUpdate < resurrectionCacheTimeout) then
+        return cache.targets  -- Return cached data
     end
-  end
+
+    -- Update cache
+    local x, y, z = spGetUnitPosition(unitID)
+    local features = Spring.GetFeaturesInCylinder(x, z, healResurrectRadius)
+    local filteredFeatures = filterFeatures(features)
+    local orderedFeatures = orderFeatureIdsByEfficientTraversalPath(unitID, filteredFeatures, {})
+
+    resurrectionCache[unitID] = {
+        targets = orderedFeatures,
+        lastUpdate = currentFrame
+    }
+
+    return orderedFeatures
+end
+
+
 
 -- ///////////////////////////////////////////  checkAndRetreatIfNeeded Function
 function checkAndRetreatIfNeeded(unitID, retreatRadius)
@@ -723,7 +738,6 @@ function optimizePath(path, positions)
   return path
 end
 
--- Orders the featureIds by their optimal traversal path using the nearest neighbor algorithm and 2-opt heuristic
 function orderFeatureIdsByEfficientTraversalPath(unitId, featureIds, optimizedPathsCache)
   -- Get the positions of the unit and features
   local positions = {}
@@ -734,10 +748,9 @@ function orderFeatureIdsByEfficientTraversalPath(unitId, featureIds, optimizedPa
 
   -- Apply the nearest neighbor algorithm to find a suboptimal solution
   local path = {unitId}
-  local visited = {
-      [unitId] = true
-  }
+  local visited = {[unitId] = true}
   local firstId = nil
+
   while #path < #featureIds + 1 do
       local bestDist = math.huge
       local bestId = -1
@@ -746,15 +759,8 @@ function orderFeatureIdsByEfficientTraversalPath(unitId, featureIds, optimizedPa
               local currentFeatureId = path[#path]
               local currentFeaturePos = positions[currentFeatureId]
               local nextFeaturePos = positions[id]
-              if not currentFeaturePos then
-                  Spring.Log("orderFeatureIdsByEfficientTraversalPath", LOG.ERROR,
-                      "currentFeaturePos is nil for currentFeatureId=" .. currentFeatureId)
-              elseif not nextFeaturePos then
-                  Spring.Log("orderFeatureIdsByEfficientTraversalPath", LOG.ERROR,
-                      "nextFeaturePos is nil for id=" .. id)
-              else
-                  local dist =
-                      dist2D(currentFeaturePos[1], currentFeaturePos[3], nextFeaturePos[1], nextFeaturePos[3])
+              if currentFeaturePos and nextFeaturePos then
+                  local dist = dist2D(currentFeaturePos[1], currentFeaturePos[3], nextFeaturePos[1], nextFeaturePos[3])
                   if dist < bestDist then
                       bestDist = dist
                       bestId = id
@@ -763,7 +769,6 @@ function orderFeatureIdsByEfficientTraversalPath(unitId, featureIds, optimizedPa
           end
       end
 
-      -- Check the cache first time through. Cache is indexed by first nearest neighbor.
       if firstId == nil then
           firstId = bestId
           if optimizedPathsCache[firstId] ~= nil then
@@ -783,15 +788,63 @@ function orderFeatureIdsByEfficientTraversalPath(unitId, featureIds, optimizedPa
 
   -- Return the ordered featureIds
   local orderedFeatureIds = {}
-  for i, id in ipairs(path) do
-      orderedFeatureIds[i] = id
+  for _, id in ipairs(path) do
+      orderedFeatureIds[#orderedFeatureIds + 1] = id
   end
 
-  -- Add result to cache.
+  -- Add result to cache
   optimizedPathsCache[firstId] = orderedFeatureIds
 
   return orderedFeatureIds
 end
+
+-- Helper function: Calculates the 2D Euclidean distance between two points
+function dist2D(x1, z1, x2, z2)
+  return math.sqrt((x2 - x1)^2 + (z2 - z1)^2)
+end
+
+-- Helper function: Applies the 2-opt heuristic to the given path to find a locally optimal solution
+function optimizePath(path, positions)
+  local improved = true
+  while improved do
+      improved = false
+      for i = 1, #path - 2 do
+          for j = i + 1, #path - 1 do
+              local order = {}
+              for k = 1, #path do
+                  if k < i or k > j then
+                      table.insert(order, path[k])
+                  end
+              end
+              for k = j, i, -1 do
+                  table.insert(order, path[k])
+              end
+              for k = j + 1, #path do
+                  table.insert(order, path[k])
+              end
+              local newDist = computePathDistance(order, positions)
+              local oldDist = computePathDistance(path, positions)
+              if newDist < oldDist then
+                  path = order
+                  improved = true
+              end
+          end
+      end
+  end
+  return path
+end
+
+-- Helper function: Computes the total distance of the path that visits all the features in the given order
+function computePathDistance(order, positions)
+  local distance = 0
+  for i = 2, #order do
+      local x1, _, z1 = unpack(positions[order[i - 1]])
+      local x2, _, z2 = unpack(positions[order[i]])
+      distance = distance + dist2D(x1, z1, x2, z2)
+  end
+  return distance
+end
+
 
 function resurrectNearbyDeadUnits(unitID, healResurrectRadius)
   local x, y, z = spGetUnitPosition(unitID)
@@ -799,7 +852,8 @@ function resurrectNearbyDeadUnits(unitID, healResurrectRadius)
 
   local features = Spring.GetFeaturesInCylinder(x, z, healResurrectRadius)
   local filteredFeatures = filterFeatures(features)
-  local orderedFeatures = orderFeatureIdsByEfficientTraversalPath(unitID, filteredFeatures, {})
+  local orderedFeatures = orderFeatureIdsByEfficientTraversalPath(unitID, filteredFeatures, optimizedPathsCache)
 
   return orderedFeatures
 end
+
