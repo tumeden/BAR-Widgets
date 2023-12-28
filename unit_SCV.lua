@@ -15,7 +15,7 @@ end
 
 -- ///////////////////////////////////////////  Adjustable variables, to suit the widget users preference
 
-local healResurrectRadius = 4000 -- Set your desired heal/resurrect radius here
+local healResurrectRadius = 1000 -- Set your desired heal/resurrect radius here
 local reclaimRadius = 4000 -- Set your desired reclaim radius here
 local retreatRadius = 800  -- The detection area around the SCV unit, which causes it to retreat.
 local enemyAvoidanceRadius = 675  -- Adjust this value as needed -- Define a safe distance for enemy avoidance
@@ -100,46 +100,35 @@ local mathFloor = math.floor
 
 -- /////////////////////////////////////////// Initialize Function
 function widget:Initialize()
-  -- Check if the widget should be removed (e.g., in a replay or spectating state)
-  if Spring.IsReplay() or Spring.GetSpectatingState() then
-      widgetHandler:RemoveWidget()
-      return
-  end
+  -- Define rezbots unit definition IDs
+  local armRectrDefID, corNecroDefID
 
-  -- Define commander unit definition IDs
-  local armComDefID, corComDefID
-
-  -- Check and store the UnitDefIDs for the commanders
-  if UnitDefNames and UnitDefNames.armcom and UnitDefNames.corcom then
-      armComDefID = UnitDefNames.armcom.id
-      corComDefID = UnitDefNames.corcom.id
+  -- Check and store the UnitDefIDs for the rezbots
+  if UnitDefNames and UnitDefNames.armrectr and UnitDefNames.cornecro then
+      armRectrDefID = UnitDefNames.armrectr.id
+      corNecroDefID = UnitDefNames.cornecro.id
   else
-      -- Handle the case where UnitDefNames are not available or commanders are undefined
-      Spring.Echo("Commander UnitDefIDs could not be determined")
+      -- Handle the case where UnitDefNames are not available or units are undefined
+      Spring.Echo("Rezbot UnitDefIDs could not be determined")
       widgetHandler:RemoveWidget(self)
       return
   end
 
-  -- Store commander UnitDefIDs globally within the widget for later use
-  -- (Note: Adjust these variable names as per your widget's naming conventions)
-  self.armComDefID = armComDefID
-  self.corComDefID = corComDefID
-
-  -- Additional initialization code can go here
-  -- ...
+  -- Store rezbots UnitDefIDs globally within the widget for later use
+  self.armRectrDefID = armRectrDefID
+  self.corNecroDefID = corNecroDefID
 end
 
 
 -- ///////////////////////////////////////////  UnitCreated Function
 function widget:UnitCreated(unitID, unitDefID, unitTeam)
-  -- Check if the unit is a commander
-  if unitDefID == UnitDefNames.armcom.id or unitDefID == UnitDefNames.corcom.id then
-      -- Skip processing for commanders
-      return
-  end
+  -- Check if the unit is a rezbot
+  if unitDefID ~= self.armRectrDefID and unitDefID ~= self.corNecroDefID then
+    -- Skip processing for non-rezbots
+    return
+end
 
   local unitDef = UnitDefs[unitDefID]
-  if unitDef ~= nil and unitDef.canReclaim and unitDef.canResurrect then
       -- Initialize unit to collect resources
       unitsToCollect[unitID] = {
           featureCount = 0,
@@ -147,30 +136,27 @@ function widget:UnitCreated(unitID, unitDefID, unitTeam)
       }
 
       processUnits({[unitID] = unitsToCollect[unitID]})
-  end
 end
-
 
 
 -- ///////////////////////////////////////////  UnitDestroyed Function
 function widget:UnitDestroyed(unitID, unitDefID, unitTeam)
-  local unitDef = UnitDefs[unitDefID]
+  -- Check if the unit is a rezbot
+  if unitDefID == self.armRectrDefID or unitDefID == self.corNecroDefID then
+      unitsToCollect[unitID] = nil
 
-  if unitDef.canReclaim and unitDef.canResurrect then
-    unitsToCollect[unitID] = nil
+      local units = Spring.GetTeamUnits(Spring.GetMyTeamID())
+      for _, uID in ipairs(units) do
+          local uDefID = spGetUnitDefID(uID)
+          local uDef = UnitDefs[uDefID]
+          local unitCommands = Spring.GetUnitCommands(uID, 1)
 
-    local units = Spring.GetTeamUnits(Spring.GetMyTeamID())
-    for _, uID in ipairs(units) do
-      local uDefID = spGetUnitDefID(uID)
-      local uDef = UnitDefs[uDefID]
-      local unitCommands = Spring.GetUnitCommands(uID, 1)
-
-      if uID ~= unitID and uDef.canReclaim and (not unitCommands or #unitCommands == 0) then
-        unitsToCollect[uID] = { featureCount = 0, lastReclaimedFrame = 0 }
-        processUnits({[uID] = unitsToCollect[uID]})
-        break
+          if uID ~= unitID and uDefID == self.armRectrDefID or uDefID == self.corNecroDefID and (not unitCommands or #unitCommands == 0) then
+              unitsToCollect[uID] = { featureCount = 0, lastReclaimedFrame = 0 }
+              processUnits({[uID] = unitsToCollect[uID]})
+              break
+          end
       end
-    end
   end
 end
 
@@ -194,6 +180,7 @@ end
 
 -- /////////////////////////////////////////// GameFrame Function
 function widget:GameFrame(currentFrame)
+  
   -- Interval for checking stuck units
   local stuckCheckInterval = 3000  -- Number of game frames to wait between checks
 
