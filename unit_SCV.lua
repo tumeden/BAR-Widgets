@@ -5,7 +5,7 @@ function widget:GetInfo()
     desc      = "RezBots Resurrect, Collect resources, and heal injured units.",
     author    = "Tumeden",
     date      = "2024",
-    version   = "v4.7",
+    version   = "v4.9",
     license   = "GNU GPL, v2 or later",
     layer     = 0,
     enabled   = true
@@ -96,6 +96,129 @@ local mathPi = math.pi
 local mathCos = math.cos
 local mathSin = math.sin
 local mathFloor = math.floor
+
+
+
+
+-- /////////////////////////////////////////// -- /////////////////////////////////////////// --
+-- /////////////////////////////////////////// -- /////////////////////////////////////////// --
+-- ////////////////////////////////////////- UI CODE -////////////////////////////////////// --
+-- /////////////////////////////////////////// -- /////////////////////////////////////////// --
+-- /////////////////////////////////////////// -- /////////////////////////////////////////// --
+
+
+-- /////////////////////////////////////////// UI Variables
+-- UI Constants and Variables
+local windowSize = { width = 300, height = 400 }
+local vsx, vsy = Spring.GetViewGeometry() -- Screen dimensions
+local windowPos = { x = (vsx - windowSize.width) / 2, y = (vsy - windowSize.height) / 2 } -- Center the window
+
+local checkboxes = {
+  healing = { x = windowPos.x + 30, y = windowPos.y + 50, size = 20, state = true, label = "Enable Healing" },
+  resurrecting = { x = windowPos.x + 30, y = windowPos.y + 80, size = 20, state = true, label = "Enable Resurrecting" },
+  collecting = { x = windowPos.x + 30, y = windowPos.y + 110, size = 20, state = true, label = "Enable Collecting" },
+}
+
+-- Define UI elements relative to the window
+local button = { x = windowPos.x + 50, y = windowPos.y + 50, width = 100, height = 30, text = "Toggle Widget", state = widgetEnabled }
+local slider = { x = windowPos.x + 50, y = windowPos.y + 100, width = 200, value = healResurrectRadius, min = 100, max = 2000 }
+
+-- Utility function for point inside rectangle
+local function isInsideRect(x, y, rect)
+    return x >= rect.x and x <= (rect.x + rect.width) and y >= rect.y and y <= (rect.y + rect.height)
+end
+
+
+
+-- /////////////////////////////////////////// KeyPress Function Modification
+function widget:KeyPress(key, mods, isRepeat)
+  if key == 0x0063 and mods.alt then -- 0x0063 is the key code for "c"
+      showUI = not showUI
+      return true
+  end
+  return false
+end
+
+
+-- /////////////////////////////////////////// Drawing the UI
+function widget:DrawScreen()
+  if showUI then
+      -- Draw the window background
+      gl.Color(0, 0, 0, 0.7)
+      gl.Rect(windowPos.x, windowPos.y, windowPos.x + windowSize.width, windowPos.y + windowSize.height)
+
+        -- Draw checkboxes
+        for _, box in pairs(checkboxes) do
+          gl.Color(1, 1, 1, 1) -- White color for box
+          gl.Rect(box.x, box.y, box.x + box.size, box.y + box.size)
+          if box.state then
+              gl.Color(0, 1, 0, 1) -- Green color for tick
+              gl.LineWidth(2)
+              glBeginEnd(GL.LINES, function()
+                  glVertex(box.x + 3, box.y + box.size - 3)
+                  glVertex(box.x + box.size - 3, box.y + 3)
+              end)
+              gl.LineWidth(1)
+          end
+          gl.Text(box.label, box.x + box.size + 10, box.y, 12)
+      end
+  end
+end
+
+
+-- /////////////////////////////////////////// Handling UI Interactions
+function widget:MousePress(x, y, button)
+  if showUI then
+      -- Existing button and slider interaction code...
+
+      -- Handle checkbox interactions
+      for key, box in pairs(checkboxes) do
+          if isInsideRect(x, y, { x = box.x, y = box.y, width = box.size, height = box.size }) then
+              box.state = not box.state
+              -- Implement the logic based on the checkbox state
+              if key == "healing" then
+                  -- Logic for enabling/disabling healing
+              elseif key == "resurrecting" then
+                  -- Logic for enabling/disabling resurrecting
+              elseif key == "collecting" then
+                  -- Logic for enabling/disabling collecting
+              end
+              return true
+          end
+      end
+  end
+  return false
+end
+
+
+function widget:MouseMove(x, y, dx, dy, button)
+  -- Handle mouse move events, especially for dragging the slider knob
+end
+
+function widget:MouseRelease(x, y, button)
+  -- Handle mouse release events if necessary
+end
+
+-- /////////////////////////////////////////// ViewResize
+function widget:ViewResize(newX, newY)
+  vsx, vsy = newX, newY
+  windowPos.x = (vsx - windowSize.width) / 2
+  windowPos.y = (vsy - windowSize.height) / 2
+  -- Update positions of UI elements
+  button.x = windowPos.x + 50
+  button.y = windowPos.y + 50
+  slider.x = windowPos.x + 50
+  slider.y = windowPos.y + 100
+end
+
+-- /////////////////////////////////////////// -- /////////////////////////////////////////// --
+-- /////////////////////////////////////////// -- /////////////////////////////////////////// --
+-- ////////////////////////////////////////- END UI CODE -////////////////////////////////////// --
+-- /////////////////////////////////////////// -- /////////////////////////////////////////// --
+-- /////////////////////////////////////////// -- /////////////////////////////////////////// --
+
+
+
 
 -- /////////////////////////////////////////// Initialize Function
 function widget:Initialize()
@@ -289,68 +412,68 @@ function processUnits(units)
           return -- Skip this unit as it's already resurrecting something
       end
 
-      -- Check for nearby enemies and avoid if necessary
-      local nearestEnemy, distance = findNearestEnemy(unitID, enemyAvoidanceRadius)
-      if nearestEnemy and distance < enemyAvoidanceRadius then
-          avoidEnemy(unitID, nearestEnemy)
-          unitData.taskType = "avoidingEnemy"
-          unitData.taskStatus = "in_progress"
-          -- Skip other actions for this unit in this cycle
-          return
-      end
+        -- Avoid enemies if necessary
+        local nearestEnemy, distance = findNearestEnemy(unitID, enemyAvoidanceRadius)
+        if nearestEnemy and distance < enemyAvoidanceRadius then
+            avoidEnemy(unitID, nearestEnemy)
+            unitData.taskType = "avoidingEnemy"
+            unitData.taskStatus = "in_progress"
+            return
+        end
 
-      -- Check for resurrection task first
-      local resurrectableFeatures = resurrectNearbyDeadUnits(unitID, healResurrectRadius)
-      if #resurrectableFeatures > 0 then
-          local orders = generateOrders(resurrectableFeatures, false, nil)
-          for _, order in ipairs(orders) do
-              if Spring.ValidFeatureID(order[2] - Game.maxUnits) then
-                  spGiveOrderToUnit(unitID, order[1], order[2], order[3])
-              end
-          end
-          unitData.taskType = "resurrecting"
-          unitData.taskStatus = "in_progress"
-          resurrectingUnits[unitID] = true  -- Mark unit as performing resurrection task
-          return -- Exit the function once a resurrection task is assigned
-      end
+        -- Resurrecting Logic
+        if checkboxes.resurrecting.state then
+            local resurrectableFeatures = resurrectNearbyDeadUnits(unitID, healResurrectRadius)
+            if #resurrectableFeatures > 0 then
+                local orders = generateOrders(resurrectableFeatures, false, nil)
+                for _, order in ipairs(orders) do
+                    if Spring.ValidFeatureID(order[2] - Game.maxUnits) then
+                        spGiveOrderToUnit(unitID, order[1], order[2], order[3])
+                    end
+                end
+                unitData.taskType = "resurrecting"
+                unitData.taskStatus = "in_progress"
+                resurrectingUnits[unitID] = true
+                return
+            end
+        end
 
-      local resourceNeed = assessResourceNeeds()
-      local featureCollected = false
+        -- Collecting Logic
+        if checkboxes.collecting.state then
+            local resourceNeed = assessResourceNeeds()
+            local featureCollected = false
 
-      -- Prioritize resource collection if no resurrection needed
-      if resourceNeed ~= "none" then
-          local x, y, z = spGetUnitPosition(unitID)
-          if not x or not z then return nil end  -- Validate unit position
+            if resourceNeed ~= "none" then
+                local x, y, z = spGetUnitPosition(unitID)
+                local featureID = findReclaimableFeature(unitID, x, z, reclaimRadius, resourceNeed)
+                if featureID and Spring.ValidFeatureID(featureID) then
+                    spGiveOrderToUnit(unitID, CMD_RECLAIM, {featureID + Game.maxUnits}, {})
+                    unitData.featureCount = 1
+                    unitData.lastReclaimedFrame = Spring.GetGameFrame()
+                    targetedFeatures[featureID] = (targetedFeatures[featureID] or 0) + 1
+                    unitData.taskType = "reclaiming"
+                    unitData.taskStatus = "in_progress"
+                    featureCollected = true
+                end
+            end
+        end
 
-          local featureID = findReclaimableFeature(unitID, x, z, reclaimRadius, resourceNeed)
-          if featureID and Spring.ValidFeatureID(featureID) then
-              spGiveOrderToUnit(unitID, CMD_RECLAIM, {featureID + Game.maxUnits}, {})
-              unitData.featureCount = 1
-              unitData.lastReclaimedFrame = Spring.GetGameFrame()
-              targetedFeatures[featureID] = (targetedFeatures[featureID] or 0) + 1
-              unitData.taskType = "reclaiming"
-              unitData.taskStatus = "in_progress"
-              featureCollected = true
-          end
-      end
-
-      -- Consider healing if no resurrection or reclaiming is needed
-      if not featureCollected then
-          local nearestDamagedUnit, distance = findNearestDamagedFriendly(unitID, healResurrectRadius)
-          if nearestDamagedUnit and distance < healResurrectRadius then
-              healingTargets[nearestDamagedUnit] = healingTargets[nearestDamagedUnit] or 0
-              if healingTargets[nearestDamagedUnit] < maxHealersPerUnit and not healingUnits[unitID] then
-                  Spring.GiveOrderToUnit(unitID, CMD.REPAIR, {nearestDamagedUnit}, {})
-                  healingUnits[unitID] = nearestDamagedUnit
-                  healingTargets[nearestDamagedUnit] = healingTargets[nearestDamagedUnit] + 1
-                  unitData.taskType = "healing"
-                  unitData.taskStatus = "in_progress"
-              end
-          end
-      end
-  end
+        -- Healing Logic
+        if checkboxes.healing.state and not featureCollected then
+            local nearestDamagedUnit, distance = findNearestDamagedFriendly(unitID, healResurrectRadius)
+            if nearestDamagedUnit and distance < healResurrectRadius then
+                healingTargets[nearestDamagedUnit] = healingTargets[nearestDamagedUnit] or 0
+                if healingTargets[nearestDamagedUnit] < maxHealersPerUnit and not healingUnits[unitID] then
+                    Spring.GiveOrderToUnit(unitID, CMD.REPAIR, {nearestDamagedUnit}, {})
+                    healingUnits[unitID] = nearestDamagedUnit
+                    healingTargets[nearestDamagedUnit] = healingTargets[nearestDamagedUnit] + 1
+                    unitData.taskType = "healing"
+                    unitData.taskStatus = "in_progress"
+                end
+            end
+        end
+    end
 end
-
 
 
 
@@ -513,10 +636,10 @@ function widget:UnitIdle(unitID)
   local unitDefID = spGetUnitDefID(unitID)
   local unitDef = UnitDefs[unitDefID]
 
-  if not unitDef or not (unitDef.canReclaim and unitDef.canResurrect) then
-      return -- Exit early if the unitDef is nil or the unit cannot reclaim/resurrect
+  if not unitDef then
+      return -- Exit early if the unitDef is nil
   end
-  
+
   -- Initialize unitData if it does not exist for this unit
   local unitData = unitsToCollect[unitID]
   if not unitData then
@@ -527,35 +650,45 @@ function widget:UnitIdle(unitID)
           featureID = nil  -- Make sure to initialize all fields that will be used
       }
       unitsToCollect[unitID] = unitData
-      Spring.Echo("UnitIdle: Initialized unitsToCollect entry for unitID:", unitID)
+      -- Spring.Echo("UnitIdle: Initialized unitsToCollect entry for unitID:", unitID)
   else
       unitData.taskStatus = "idle"
   end
 
-  -- Reassign task immediately
-  processUnits({[unitID] = unitData})
+  -- Re-queue the unit for tasks based on the checkbox states
+  if (unitDef.canReclaim and checkboxes.collecting.state) or
+     (unitDef.canResurrect and checkboxes.resurrecting.state) or
+     (unitDef.canRepair and checkboxes.healing.state) then
+      processUnits({[unitID] = unitData})
+  end
 
   -- Manage targeted features and healing units
-  if unitData.featureID and targetedFeatures[unitData.featureID] then
-      targetedFeatures[unitData.featureID] = targetedFeatures[unitData.featureID] - 1
+  if unitData.featureID then
+      targetedFeatures[unitData.featureID] = (targetedFeatures[unitData.featureID] or 0) - 1
       if targetedFeatures[unitData.featureID] <= 0 then
           targetedFeatures[unitData.featureID] = nil
       end
       unitData.featureID = nil  -- Reset featureID since the unit is idle now
   end
 
+  -- Clean up any state related to healing, resurrecting, or collecting
   if healingUnits[unitID] then
       local healedUnitID = healingUnits[unitID]
-      healingTargets[healedUnitID] = healingTargets[healedUnitID] - 1
+      healingTargets[healedUnitID] = (healingTargets[healedUnitID] or 0) - 1
       if healingTargets[healedUnitID] <= 0 then
           healingTargets[healedUnitID] = nil
       end
       healingUnits[unitID] = nil
   end
 
-  -- Remove the unit from resurrectingUnits if it's there
-  resurrectingUnits[unitID] = nil
+  if resurrectingUnits[unitID] then
+      resurrectingUnits[unitID] = nil
+  end
+
+  -- Additional cleanup or re-queue logic can go here, if needed
 end
+
+
 
 
 
@@ -739,7 +872,7 @@ function orderFeatureIdsByEfficientTraversalPath(unitId, featureIds, optimizedPa
 
   -- Verify featureIds contains valid IDs
   if not featureIds or #featureIds == 0 then
-      Spring.Echo("Warning: No valid feature IDs provided to orderFeatureIdsByEfficientTraversalPath")
+     -- Spring.Echo("Warning: No valid feature IDs provided to orderFeatureIdsByEfficientTraversalPath")
       return {} -- Return an empty table if no features to process
   end
 
@@ -868,100 +1001,4 @@ function resurrectNearbyDeadUnits(unitID, healResurrectRadius)
   return orderedFeatures
 end
 
-
-
-
-
--- /////////////////////////////////////////// -- /////////////////////////////////////////// --
--- /////////////////////////////////////////// -- /////////////////////////////////////////// --
--- ////////////////////////////////////////- UI CODE -////////////////////////////////////// --
--- /////////////////////////////////////////// -- /////////////////////////////////////////// --
--- /////////////////////////////////////////// -- /////////////////////////////////////////// --
-
-
--- /////////////////////////////////////////// UI Variables
--- UI Constants and Variables
-local windowSize = { width = 300, height = 400 }
-local vsx, vsy = Spring.GetViewGeometry() -- Screen dimensions
-local windowPos = { x = (vsx - windowSize.width) / 2, y = (vsy - windowSize.height) / 2 } -- Center the window
-
--- Define UI elements relative to the window
-local button = { x = windowPos.x + 50, y = windowPos.y + 50, width = 100, height = 30, text = "Toggle Widget", state = widgetEnabled }
-local slider = { x = windowPos.x + 50, y = windowPos.y + 100, width = 200, value = healResurrectRadius, min = 100, max = 2000 }
-
--- Utility function for point inside rectangle
-local function isInsideRect(x, y, rect)
-    return x >= rect.x and x <= (rect.x + rect.width) and y >= rect.y and y <= (rect.y + rect.height)
-end
-
-
-
--- /////////////////////////////////////////// KeyPress Function Modification
-function widget:KeyPress(key, mods, isRepeat)
-  if key == 0x0063 and mods.alt then -- 0x0063 is the key code for "c"
-      showUI = not showUI
-      return true
-  end
-  return false
-end
-
-
--- /////////////////////////////////////////// Drawing the UI
-function widget:DrawScreen()
-  if showUI then
-      -- Draw the window background
-      gl.Color(0, 0, 0, 0.7)
-      gl.Rect(windowPos.x, windowPos.y, windowPos.x + windowSize.width, windowPos.y + windowSize.height)
-
-      -- Draw the toggle button
-      gl.Color(0.2, 0.2, 0.2, 1)
-      gl.Rect(button.x, button.y, button.x + button.width, button.y + button.height)
-      gl.Text(button.text, button.x + 10, button.y + 10, 12)
-
-      -- Draw the slider
-      gl.Color(0.5, 0.5, 0.5, 1)
-      gl.Rect(slider.x, slider.y, slider.x + slider.width, slider.y + 10)
-      local sliderPos = slider.x + ((slider.value - slider.min) / (slider.max - slider.min)) * slider.width
-      gl.Color(1, 1, 1, 1)
-      gl.Rect(sliderPos - 5, slider.y - 5, sliderPos + 5, slider.y + 15)
-  end
-end
-
-
--- /////////////////////////////////////////// Handling UI Interactions
-function widget:MousePress(x, y, button)
-  if showUI then
-      if isInsideRect(x, y, { x = button.x, y = button.y, width = button.width, height = button.height }) then
-          widgetEnabled = not widgetEnabled
-          return true
-      end
-      if isInsideRect(x, y, { x = slider.x, y = slider.y - 5, width = slider.width, height = 20 }) then
-          local newValue = slider.min + ((x - slider.x) / slider.width) * (slider.max - slider.min)
-          slider.value = math.max(slider.min, math.min(slider.max, newValue))
-          healResurrectRadius = slider.value
-          return true
-      end
-  end
-  return false
-end
-
-function widget:MouseMove(x, y, dx, dy, button)
-  -- Handle mouse move events, especially for dragging the slider knob
-end
-
-function widget:MouseRelease(x, y, button)
-  -- Handle mouse release events if necessary
-end
-
--- /////////////////////////////////////////// ViewResize
-function widget:ViewResize(newX, newY)
-  vsx, vsy = newX, newY
-  windowPos.x = (vsx - windowSize.width) / 2
-  windowPos.y = (vsy - windowSize.height) / 2
-  -- Update positions of UI elements
-  button.x = windowPos.x + 50
-  button.y = windowPos.y + 50
-  slider.x = windowPos.x + 50
-  slider.y = windowPos.y + 100
-end
 
