@@ -812,8 +812,10 @@ function orderFeatureIdsByEfficientTraversalPath(unitId, featureIds, optimizedPa
       return {} -- Return an empty table if no valid firstId found
   end
 
-  -- Cache the result
-  optimizedPathsCache[firstId] = orderedFeatureIds
+    -- Add result to cache.
+    if firstId ~= nil then
+      optimizedPathsCache[firstId] = orderedFeatureIds
+  end
 
   return orderedFeatureIds
 end
