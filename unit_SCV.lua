@@ -536,33 +536,51 @@ function widget:UnitIdle(unitID)
   local unitDefID = spGetUnitDefID(unitID)
   local unitDef = UnitDefs[unitDefID]
 
-  if unitDef and (unitDef.canReclaim and unitDef.canResurrect) then
-      local unitData = unitsToCollect[unitID]
-      if not unitData then
-          unitData = { featureCount = 0, lastReclaimedFrame = 0, taskStatus = "idle" }
-          unitsToCollect[unitID] = unitData
-      else
-          unitData.taskStatus = "idle"
-      end
-
-      -- Reassign task immediately
-      processUnits({[unitID] = unitData})
-
-      -- Manage targeted features and healing units
-      local featureID = unitData.featureID
-      if featureID and targetedFeatures[featureID] then
-          targetedFeatures[featureID] = math.max(targetedFeatures[featureID] - 1, 0)
-      end
-      local healedUnitID = healingUnits[unitID]
-      if healedUnitID and healingTargets[healedUnitID] then
-          healingTargets[healedUnitID] = math.max(healingTargets[healedUnitID] - 1, 0)
-      end
-
-      -- Remove the unit from healingUnits and resurrectingUnits if it's there
-      healingUnits[unitID] = nil
-      resurrectingUnits[unitID] = nil
+  if not unitDef or not (unitDef.canReclaim and unitDef.canResurrect) then
+      return -- Exit early if the unitDef is nil or the unit cannot reclaim/resurrect
   end
+  
+  -- Initialize unitData if it does not exist for this unit
+  local unitData = unitsToCollect[unitID]
+  if not unitData then
+      unitData = {
+          featureCount = 0,
+          lastReclaimedFrame = 0,
+          taskStatus = "idle",
+          featureID = nil  -- Make sure to initialize all fields that will be used
+      }
+      unitsToCollect[unitID] = unitData
+      Spring.Echo("UnitIdle: Initialized unitsToCollect entry for unitID:", unitID)
+  else
+      unitData.taskStatus = "idle"
+  end
+
+  -- Reassign task immediately
+  processUnits({[unitID] = unitData})
+
+  -- Manage targeted features and healing units
+  if unitData.featureID and targetedFeatures[unitData.featureID] then
+      targetedFeatures[unitData.featureID] = targetedFeatures[unitData.featureID] - 1
+      if targetedFeatures[unitData.featureID] <= 0 then
+          targetedFeatures[unitData.featureID] = nil
+      end
+      unitData.featureID = nil  -- Reset featureID since the unit is idle now
+  end
+
+  if healingUnits[unitID] then
+      local healedUnitID = healingUnits[unitID]
+      healingTargets[healedUnitID] = healingTargets[healedUnitID] - 1
+      if healingTargets[healedUnitID] <= 0 then
+          healingTargets[healedUnitID] = nil
+      end
+      healingUnits[unitID] = nil
+  end
+
+  -- Remove the unit from resurrectingUnits if it's there
+  resurrectingUnits[unitID] = nil
 end
+
+
 
 
 
