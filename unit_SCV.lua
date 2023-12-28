@@ -5,12 +5,31 @@ function widget:GetInfo()
     desc      = "Collects resources, and heals injured units.",
     author    = "Tumeden",
     date      = "2024",
-    version   = "v4.1",
+    version   = "v4.3",
     license   = "GNU GPL, v2 or later",
     layer     = 0,
     enabled   = true
   }
 end
+
+
+-- ///////////////////////////////////////////  Adjustable variables, to suit the widget users preference
+
+local healResurrectRadius = 4000 -- Set your desired heal/resurrect radius here
+local reclaimRadius = 4000 -- Set your desired reclaim radius here
+local retreatRadius = 800  -- The detection area around the SCV unit, which causes it to retreat.
+local enemyAvoidanceRadius = 675  -- Adjust this value as needed -- Define a safe distance for enemy avoidance
+local closeHealingThreshold = 300 -- Units within this range will prioritize healing
+
+
+
+
+
+-- /////////////////////////////////////////// ---- /////////////////////////////////////////// ---- /////////////////////////////////////////// 
+-- /////////////////////////////////////////// ---                Main Code                     ---- /////////////////////////////////////////// 
+-- /////////////////////////////////////////// ----  Do not edit things past this line          ---- ///////////////////////////////////////////
+
+
 
 -- /////////////////////////////////////////// Important things :))
 local widgetEnabled = true
@@ -26,6 +45,12 @@ local maxUnitsPerFeature = 4  -- Maximum units allowed to target the same featur
 local healingTargets = {}  -- Track which units are being healed and by how many healers
 local maxHealersPerUnit = 4  -- Maximum number of healers per unit
 local unitTaskStatus = {}
+local CMD_RECLAIM = CMD.RECLAIM
+local maxUnits = 1000000
+local avoidanceCooldown = 30 -- Cooldown in game frames, 30 Default.
+
+-- engine call optimizations
+-- =========================
 local spGetUnitDefID = Spring.GetUnitDefID
 local spGiveOrderToUnit = Spring.GiveOrderToUnit
 local spGetUnitPosition = Spring.GetUnitPosition
@@ -33,21 +58,47 @@ local spGetFeaturesInCylinder = Spring.GetFeaturesInCylinder
 local spGetFeatureDefID = Spring.GetFeatureDefID
 local spGetMyTeamID = Spring.GetMyTeamID
 local spGetTeamResources = Spring.GetTeamResources
-local CMD_RECLAIM = CMD.RECLAIM
-local maxUnits = 1000000
-local avoidanceCooldown = 30 -- Cooldown in game frames, 30 Default.
+local SpringGetUnitDefID = Spring.GetUnitDefID
+local SpringGetUnitTeam = Spring.GetUnitTeam
+local SpringGetSpectatingState = Spring.GetSpectatingState
+local SpringGetMyTeamID = Spring.GetMyTeamID
+local SpringGetCommandQueue = Spring.GetCommandQueue
+local SpringGiveOrderToUnit = Spring.GiveOrderToUnit
+local SpringGetTeamUnits = Spring.GetTeamUnits
+local SpringGetSelectedUnits = Spring.GetSelectedUnits
+local SpringGetTeamAllyTeamID = Spring.GetTeamAllyTeamID
+local SpringShareResources = Spring.ShareResources
+local SpringGetUnitPosition = Spring.GetUnitPosition
+local SpringGiveOrderToUnitArray = Spring.GiveOrderToUnitArray
+local SpringGetCameraState = Spring.GetCameraState
+local SpringIsGUIHidden = Spring.IsGUIHidden
+local SpringIsUnitSelected = Spring.IsUnitSelected
+local SpringGetUnitRadius = Spring.GetUnitRadius
+local SpringGetTeamColor = Spring.GetTeamColor
+local SpringGetModKeyState = Spring.GetModKeyState
+local SpringWorldToScreenCoords = Spring.WorldToScreenCoords
+local SpringSelectUnitArray = Spring.SelectUnitArray
+local SpringI18N = Spring.I18N
+local SpringIsSphereInView = Spring.IsSphereInView
+local SpringGetTeamList = Spring.GetTeamList
+local SpringGetTeamInfo = Spring.GetTeamInfo
+local SpringGetUnitHealth = Spring.GetUnitHealth
+local glDeleteList = gl.DeleteList
+local glCreateList = gl.CreateList
+local glCallList = gl.CallList
+local glColor = gl.Color
+local glPushMatrix = gl.PushMatrix
+local glTranslate = gl.Translate
+local glPopMatrix = gl.PopMatrix
+local glVertex = gl.Vertex
+local glBeginEnd = gl.BeginEnd
+local glLineWidth = gl.LineWidth
+local glScale = gl.Scale
 
--- ///////////////////////////////////////////  Adjustable variables, to suit the widget users preference
-local healResurrectRadius = 4000 -- Set your desired heal/resurrect radius here
-local reclaimRadius = 4000 -- Set your desired reclaim radius here
-local retreatRadius = 800  -- The detection area around the SCV unit, which causes it to retreat.
-local enemyAvoidanceRadius = 675  -- Adjust this value as needed -- Define a safe distance for enemy avoidance
-local closeHealingThreshold = 300 -- Units within this range will prioritize healing
-
-
--- /////////////////////////////////////////// ---- /////////////////////////////////////////// ---- /////////////////////////////////////////// 
--- /////////////////////////////////////////// ---                Main Code                     ---- /////////////////////////////////////////// 
-
+local mathPi = math.pi
+local mathCos = math.cos
+local mathSin = math.sin
+local mathFloor = math.floor
 
 -- /////////////////////////////////////////// Initialize Function
 function widget:Initialize()
@@ -426,11 +477,20 @@ end
 function checkAndRetreatIfNeeded(unitID, retreatRadius)
   local nearestEnemy, distance = findNearestEnemy(unitID, retreatRadius)
 
-  if nearestEnemy and distance < retreatRadius then
-    -- Process avoidance and retreat in a unified manner
-    avoidEnemy(unitID, nearestEnemy, distance)
+  -- Check if the unit is not a commander or a construction bot before retreating
+  local unitDefID = spGetUnitDefID(unitID)
+  if unitDefID ~= armComDefID and unitDefID ~= corComDefID then
+    local unitDef = UnitDefs[unitDefID]
+    if unitDef and not unitDef.isBuilder then
+      if nearestEnemy and distance < retreatRadius then
+        -- Process avoidance and retreat in a unified manner
+        avoidEnemy(unitID, nearestEnemy, distance)
+      end
+    end
   end
 end
+
+
 
 
 
