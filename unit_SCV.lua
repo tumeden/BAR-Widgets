@@ -177,50 +177,41 @@ end
 
 
 
-
 -- /////////////////////////////////////////// GameFrame Function
 function widget:GameFrame(currentFrame)
-  
   -- Interval for checking stuck units
   local stuckCheckInterval = 3000  -- Number of game frames to wait between checks
 
   -- Interval for avoidance and other actions
   local actionInterval = 60  -- Check every 60 frames (approximately 2 seconds at 30 FPS)
 
+  -- Handle stuck units
   if currentFrame % stuckCheckInterval == 0 then
-      -- Call handleStuckUnits for each unit here
       for unitID, _ in pairs(unitsToCollect) do
           local unitDefID = spGetUnitDefID(unitID)
           local unitDef = UnitDefs[unitDefID]
-          if unitDef and (unitDef.canReclaim and unitDef.canResurrect) then
+          if unitDef and (unitDef.canReclaim and unitDef.canResurrect) and Spring.ValidUnitID(unitID) and not Spring.GetUnitIsDead(unitID) then
               handleStuckUnits(unitID, unitDef)
           end
       end
   end
 
+  -- Regular actions performed at specified intervals
   if currentFrame % actionInterval == 0 then
       if widgetEnabled then
-          -- Replace retreatUnits with checkAndRetreatIfNeeded for each unit
           for unitID, _ in pairs(unitsToCollect) do
-              checkAndRetreatIfNeeded(unitID, retreatRadius)
-          end
+              -- Check if unit is valid and exists
+              if Spring.ValidUnitID(unitID) and not Spring.GetUnitIsDead(unitID) then
+                  checkAndRetreatIfNeeded(unitID, retreatRadius)
 
-          if not unitsToCollect then
-              unitsToCollect = {}
-          end
-
-          -- Find units that can collect resources
-          processUnits(unitsToCollect)
-
-          -- Reassign tasks to idle units
-          for unitID, unitData in pairs(unitsToCollect) do
-              if unitData.taskStatus == "idle" then
-                  processUnits({[unitID] = unitData})
+                  -- Process units for tasks like collecting, healing, and resurrecting
+                  processUnits({[unitID] = unitsToCollect[unitID]})
               end
           end
       end
   end
 end
+
 
 
 
@@ -263,8 +254,12 @@ end
 -- /////////////////////////////////////////// processUnits Function
 function processUnits(units)
   for unitID, unitData in pairs(units) do
-      local unitDefID = spGetUnitDefID(unitID)
+      -- Check if unit is valid and exists
+      if not Spring.ValidUnitID(unitID) or Spring.GetUnitIsDead(unitID) then
+          return -- Skip invalid or dead units
+      end
 
+      local unitDefID = spGetUnitDefID(unitID)
       -- Check if the unit is a commander
       if unitDefID == UnitDefNames.armcom.id or unitDefID == UnitDefNames.corcom.id then
           -- Skip processing for commanders
@@ -303,7 +298,9 @@ function processUnits(units)
       if #resurrectableFeatures > 0 then
           local orders = generateOrders(resurrectableFeatures, false, nil)
           for _, order in ipairs(orders) do
-              spGiveOrderToUnit(unitID, order[1], order[2], order[3])
+              if Spring.ValidFeatureID(order[2] - Game.maxUnits) then
+                  spGiveOrderToUnit(unitID, order[1], order[2], order[3])
+              end
           end
           unitData.taskType = "resurrecting"
           unitData.taskStatus = "in_progress"
@@ -320,7 +317,7 @@ function processUnits(units)
           if not x or not z then return nil end  -- Validate unit position
 
           local featureID = findReclaimableFeature(unitID, x, z, reclaimRadius, resourceNeed)
-          if featureID then
+          if featureID and Spring.ValidFeatureID(featureID) then
               spGiveOrderToUnit(unitID, CMD_RECLAIM, {featureID + Game.maxUnits}, {})
               unitData.featureCount = 1
               unitData.lastReclaimedFrame = Spring.GetGameFrame()
@@ -347,6 +344,7 @@ function processUnits(units)
       end
   end
 end
+
 
 
 
@@ -744,6 +742,15 @@ function optimizePath(path, positions)
 end
 
 function orderFeatureIdsByEfficientTraversalPath(unitId, featureIds, optimizedPathsCache)
+  -- Ensure cache is initialized
+  optimizedPathsCache = optimizedPathsCache or {}
+
+  -- Verify featureIds contains valid IDs
+  if not featureIds or #featureIds == 0 then
+      Spring.Echo("Warning: No valid feature IDs provided to orderFeatureIdsByEfficientTraversalPath")
+      return {} -- Return an empty table if no features to process
+  end
+
   -- Get the positions of the unit and features
   local positions = {}
   positions[unitId] = {Spring.GetUnitPosition(unitId)}
@@ -758,7 +765,7 @@ function orderFeatureIdsByEfficientTraversalPath(unitId, featureIds, optimizedPa
 
   while #path < #featureIds + 1 do
       local bestDist = math.huge
-      local bestId = -1
+      local bestId = nil
       for _, id in ipairs(featureIds) do
           if not visited[id] then
               local currentFeatureId = path[#path]
@@ -766,7 +773,7 @@ function orderFeatureIdsByEfficientTraversalPath(unitId, featureIds, optimizedPa
               local nextFeaturePos = positions[id]
               if currentFeaturePos and nextFeaturePos then
                   local dist = dist2D(currentFeaturePos[1], currentFeaturePos[3], nextFeaturePos[1], nextFeaturePos[3])
-                  if dist < bestDist then
+                  if not bestId or dist < bestDist then
                       bestDist = dist
                       bestId = id
                   end
@@ -774,15 +781,15 @@ function orderFeatureIdsByEfficientTraversalPath(unitId, featureIds, optimizedPa
           end
       end
 
-      if firstId == nil then
-          firstId = bestId
-          if optimizedPathsCache[firstId] ~= nil then
-              return optimizedPathsCache[firstId]
+      if bestId then
+          if not firstId then
+              firstId = bestId
           end
+          table.insert(path, bestId)
+          visited[bestId] = true
+      else
+          break -- No unvisited features left, exit loop
       end
-
-      table.insert(path, bestId)
-      visited[bestId] = true
   end
 
   -- Apply the 2-opt heuristic to improve the solution
@@ -794,19 +801,24 @@ function orderFeatureIdsByEfficientTraversalPath(unitId, featureIds, optimizedPa
   -- Return the ordered featureIds
   local orderedFeatureIds = {}
   for _, id in ipairs(path) do
-      orderedFeatureIds[#orderedFeatureIds + 1] = id
+      if id ~= unitId then -- Ensure not to add the unitId itself
+          orderedFeatureIds[#orderedFeatureIds + 1] = id
+      end
   end
 
-  -- Add result to cache
+  -- Check if firstId was found
+  if not firstId then
+      Spring.Echo("Warning: firstId is nil after processing features. No features were found within range or all features are invalid.")
+      return {} -- Return an empty table if no valid firstId found
+  end
+
+  -- Cache the result
   optimizedPathsCache[firstId] = orderedFeatureIds
 
   return orderedFeatureIds
 end
 
--- Helper function: Calculates the 2D Euclidean distance between two points
-function dist2D(x1, z1, x2, z2)
-  return math.sqrt((x2 - x1)^2 + (z2 - z1)^2)
-end
+
 
 -- Helper function: Applies the 2-opt heuristic to the given path to find a locally optimal solution
 function optimizePath(path, positions)
