@@ -398,20 +398,6 @@ function calculateResourceScore(featureMetal, featureEnergy, distance, resourceN
 end
 
 
-
--- /////////////////////////////////////////// KeyPress Function 
-function widget:KeyPress(key, mods, isRepeat)
-  if key == 0x0063 and mods.alt then -- 0x0063 is the key code for "c"
-    widgetEnabled = not widgetEnabled
-    if widgetEnabled then
-      Spring.Echo("SCV widget enabled")
-    else
-      Spring.Echo("SCV widget disabled")
-    end
-  end
-  return false
-end
-
 -- ///////////////////////////////////////////  findNearestDamagedFriendly Function
 function findNearestDamagedFriendly(unitID, searchRadius)
   local myTeamID = spGetMyTeamID() -- Retrieve your team ID
@@ -880,5 +866,102 @@ function resurrectNearbyDeadUnits(unitID, healResurrectRadius)
   local orderedFeatures = orderFeatureIdsByEfficientTraversalPath(unitID, filteredFeatures, optimizedPathsCache)
 
   return orderedFeatures
+end
+
+
+
+
+
+-- /////////////////////////////////////////// -- /////////////////////////////////////////// --
+-- /////////////////////////////////////////// -- /////////////////////////////////////////// --
+-- ////////////////////////////////////////- UI CODE -////////////////////////////////////// --
+-- /////////////////////////////////////////// -- /////////////////////////////////////////// --
+-- /////////////////////////////////////////// -- /////////////////////////////////////////// --
+
+
+-- /////////////////////////////////////////// UI Variables
+-- UI Constants and Variables
+local windowSize = { width = 300, height = 400 }
+local vsx, vsy = Spring.GetViewGeometry() -- Screen dimensions
+local windowPos = { x = (vsx - windowSize.width) / 2, y = (vsy - windowSize.height) / 2 } -- Center the window
+
+-- Define UI elements relative to the window
+local button = { x = windowPos.x + 50, y = windowPos.y + 50, width = 100, height = 30, text = "Toggle Widget", state = widgetEnabled }
+local slider = { x = windowPos.x + 50, y = windowPos.y + 100, width = 200, value = healResurrectRadius, min = 100, max = 2000 }
+
+-- Utility function for point inside rectangle
+local function isInsideRect(x, y, rect)
+    return x >= rect.x and x <= (rect.x + rect.width) and y >= rect.y and y <= (rect.y + rect.height)
+end
+
+
+
+-- /////////////////////////////////////////// KeyPress Function Modification
+function widget:KeyPress(key, mods, isRepeat)
+  if key == 0x0063 and mods.alt then -- 0x0063 is the key code for "c"
+      showUI = not showUI
+      return true
+  end
+  return false
+end
+
+
+-- /////////////////////////////////////////// Drawing the UI
+function widget:DrawScreen()
+  if showUI then
+      -- Draw the window background
+      gl.Color(0, 0, 0, 0.7)
+      gl.Rect(windowPos.x, windowPos.y, windowPos.x + windowSize.width, windowPos.y + windowSize.height)
+
+      -- Draw the toggle button
+      gl.Color(0.2, 0.2, 0.2, 1)
+      gl.Rect(button.x, button.y, button.x + button.width, button.y + button.height)
+      gl.Text(button.text, button.x + 10, button.y + 10, 12)
+
+      -- Draw the slider
+      gl.Color(0.5, 0.5, 0.5, 1)
+      gl.Rect(slider.x, slider.y, slider.x + slider.width, slider.y + 10)
+      local sliderPos = slider.x + ((slider.value - slider.min) / (slider.max - slider.min)) * slider.width
+      gl.Color(1, 1, 1, 1)
+      gl.Rect(sliderPos - 5, slider.y - 5, sliderPos + 5, slider.y + 15)
+  end
+end
+
+
+-- /////////////////////////////////////////// Handling UI Interactions
+function widget:MousePress(x, y, button)
+  if showUI then
+      if isInsideRect(x, y, { x = button.x, y = button.y, width = button.width, height = button.height }) then
+          widgetEnabled = not widgetEnabled
+          return true
+      end
+      if isInsideRect(x, y, { x = slider.x, y = slider.y - 5, width = slider.width, height = 20 }) then
+          local newValue = slider.min + ((x - slider.x) / slider.width) * (slider.max - slider.min)
+          slider.value = math.max(slider.min, math.min(slider.max, newValue))
+          healResurrectRadius = slider.value
+          return true
+      end
+  end
+  return false
+end
+
+function widget:MouseMove(x, y, dx, dy, button)
+  -- Handle mouse move events, especially for dragging the slider knob
+end
+
+function widget:MouseRelease(x, y, button)
+  -- Handle mouse release events if necessary
+end
+
+-- /////////////////////////////////////////// ViewResize
+function widget:ViewResize(newX, newY)
+  vsx, vsy = newX, newY
+  windowPos.x = (vsx - windowSize.width) / 2
+  windowPos.y = (vsy - windowSize.height) / 2
+  -- Update positions of UI elements
+  button.x = windowPos.x + 50
+  button.y = windowPos.y + 50
+  slider.x = windowPos.x + 50
+  slider.y = windowPos.y + 100
 end
 
