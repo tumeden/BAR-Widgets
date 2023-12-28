@@ -5,7 +5,7 @@ function widget:GetInfo()
     desc      = "RezBots Resurrect, Collect resources, and heal injured units.",
     author    = "Tumeden",
     date      = "2024",
-    version   = "v4.6",
+    version   = "v4.7",
     license   = "GNU GPL, v2 or later",
     layer     = 0,
     enabled   = true
