@@ -271,6 +271,7 @@ end
 
 
 -- ///////////////////////////////////////////  processUnits Function
+-- /////////////////////////////////////////// processUnits Function
 function processUnits(units)
   for unitID, unitData in pairs(units) do
       local unitDefID = spGetUnitDefID(unitID)
@@ -326,9 +327,9 @@ function processUnits(units)
       -- If no resources needed or no features found, consider healing or other tasks
       if not featureCollected then
           local nearestDamagedUnit, distance = findNearestDamagedFriendly(unitID, healResurrectRadius)
-          if nearestDamagedUnit and distance < healResurrectRadius and not healingUnits[unitID] then
+          if nearestDamagedUnit and distance < healResurrectRadius then
               healingTargets[nearestDamagedUnit] = healingTargets[nearestDamagedUnit] or 0
-              if healingTargets[nearestDamagedUnit] < maxHealersPerUnit then
+              if healingTargets[nearestDamagedUnit] < maxHealersPerUnit and not healingUnits[unitID] then
                   Spring.GiveOrderToUnit(unitID, CMD.REPAIR, {nearestDamagedUnit}, {})
                   healingUnits[unitID] = nearestDamagedUnit
                   healingTargets[nearestDamagedUnit] = healingTargets[nearestDamagedUnit] + 1
@@ -582,7 +583,7 @@ function assessResourceNeeds()
   local currentEnergy, storageEnergy = Spring.GetTeamResources(myTeamID, "energy")
 
   local metalFull = currentMetal >= storageMetal * 0.75  -- 75% full
-  local energyFull = currentEnergy >= storageEnergy * 0.90  -- 90% full
+  local energyFull = currentEnergy >= storageEnergy * 0.75  -- 75% full
 
   if metalFull and energyFull then
     return "none"
