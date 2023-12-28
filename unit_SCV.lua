@@ -5,7 +5,7 @@ function widget:GetInfo()
     desc      = "Collects resources, and heals injured units.",
     author    = "Tumeden",
     date      = "2024",
-    version   = "v4.5",
+    version   = "v4.6",
     license   = "GNU GPL, v2 or later",
     layer     = 0,
     enabled   = true
