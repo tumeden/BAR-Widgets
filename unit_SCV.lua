@@ -24,7 +24,6 @@ local closeHealingThreshold = 300 -- Units within this range will prioritize hea
 
 
 
-
 -- /////////////////////////////////////////// ---- /////////////////////////////////////////// ---- /////////////////////////////////////////// 
 -- /////////////////////////////////////////// ---                Main Code                     ---- /////////////////////////////////////////// 
 -- /////////////////////////////////////////// ----  Do not edit things past this line          ---- ///////////////////////////////////////////
@@ -33,20 +32,17 @@ local closeHealingThreshold = 300 -- Units within this range will prioritize hea
 
 -- /////////////////////////////////////////// Important things :))
 local widgetEnabled = true
-local retreatingUnits = {} -- table to keep track of retreatingUnits
+
 local unitsToCollect = {}  -- table to keep track of units and their collection state
 local lastAvoidanceTime = {} -- Table to track the last avoidance time for each unit
 local healingUnits = {}  -- table to keep track of healing units
 local unitLastPosition = {} -- Track the last position of each unit
-local repairCooldown = {}  -- Track last repair command time for each unit
-local repairInProgress = {}  -- Track units with ongoing repair commands
 local targetedFeatures = {}  -- Table to keep track of targeted features
 local maxUnitsPerFeature = 4  -- Maximum units allowed to target the same feature
 local healingTargets = {}  -- Track which units are being healed and by how many healers
 local maxHealersPerUnit = 4  -- Maximum number of healers per unit
 local unitTaskStatus = {}
 local CMD_RECLAIM = CMD.RECLAIM
-local maxUnits = 1000000
 local avoidanceCooldown = 30 -- Cooldown in game frames, 30 Default.
 
 -- engine call optimizations
@@ -335,8 +331,6 @@ function processUnits(units)
       end
   end
 end
-
-
 
 
 -- /////////////////////////////////////////// findReclaimableFeature Function
