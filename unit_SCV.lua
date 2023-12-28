@@ -5,7 +5,7 @@ function widget:GetInfo()
     desc      = "RezBots Resurrect, Collect resources, and heal injured units.",
     author    = "Tumeden",
     date      = "2024",
-    version   = "v4.9",
+    version   = "v5.0",
     license   = "GNU GPL, v2 or later",
     layer     = 0,
     enabled   = true
@@ -19,8 +19,6 @@ local healResurrectRadius = 1000 -- Set your desired heal/resurrect radius here 
 local reclaimRadius = 4000 -- Set your desired reclaim radius here (any number works, 4000 is about half a large map)
 local retreatRadius = 800  -- The detection area around the SCV unit, which causes it to retreat.
 local enemyAvoidanceRadius = 675  -- Adjust this value as needed -- Define a safe distance for enemy avoidance
-local closeHealingThreshold = 300 -- Units within this range will prioritize healing
-
 
 
 -- /////////////////////////////////////////// ---- /////////////////////////////////////////// ---- /////////////////////////////////////////// 
@@ -109,15 +107,24 @@ local mathFloor = math.floor
 
 -- /////////////////////////////////////////// UI Variables
 -- UI Constants and Variables
+local activeSlider = nil
 local windowSize = { width = 300, height = 400 }
 local vsx, vsy = Spring.GetViewGeometry() -- Screen dimensions
 local windowPos = { x = (vsx - windowSize.width) / 2, y = (vsy - windowSize.height) / 2 } -- Center the window
 
 local checkboxes = {
-  healing = { x = windowPos.x + 30, y = windowPos.y + 50, size = 20, state = true, label = "Enable Healing" },
-  resurrecting = { x = windowPos.x + 30, y = windowPos.y + 80, size = 20, state = true, label = "Enable Resurrecting" },
-  collecting = { x = windowPos.x + 30, y = windowPos.y + 110, size = 20, state = true, label = "Enable Collecting" },
+  healing = { x = windowPos.x + 30, y = windowPos.y + 50, size = 20, state = false, label = "Enable Healing" },
+  resurrecting = { x = windowPos.x + 30, y = windowPos.y + 80, size = 20, state = false, label = "Enable Resurrecting" },
+  collecting = { x = windowPos.x + 30, y = windowPos.y + 110, size = 20, state = false, label = "Enable Collecting" },
 }
+
+local sliders = {
+  healResurrectRadius = { x = windowPos.x + 50, y = windowPos.y + 200, width = 200, value = healResurrectRadius, min = 100, max = 2000, label = "Heal/Resurrect Radius" },
+  reclaimRadius = { x = windowPos.x + 50, y = windowPos.y + 230, width = 200, value = reclaimRadius, min = 100, max = 4000, label = "Reclaim Radius" },
+  retreatRadius = { x = windowPos.x + 50, y = windowPos.y + 260, width = 200, value = retreatRadius, min = 100, max = 1000, label = "Retreat Radius" },
+  enemyAvoidanceRadius = { x = windowPos.x + 50, y = windowPos.y + 290, width = 200, value = enemyAvoidanceRadius, min = 100, max = 1000, label = "Enemy Avoidance Radius" },
+}
+
 
 -- Define UI elements relative to the window
 local button = { x = windowPos.x + 50, y = windowPos.y + 50, width = 100, height = 30, text = "Toggle Widget", state = widgetEnabled }
@@ -141,29 +148,58 @@ end
 
 
 -- /////////////////////////////////////////// Drawing the UI
+-- /////////////////////////////////////////// Drawing the UI
 function widget:DrawScreen()
   if showUI then
-      -- Draw the window background
-      gl.Color(0, 0, 0, 0.7)
-      gl.Rect(windowPos.x, windowPos.y, windowPos.x + windowSize.width, windowPos.y + windowSize.height)
+    -- Draw the window background
+    gl.Color(0, 0, 0, 0.7)
+    gl.Rect(windowPos.x, windowPos.y, windowPos.x + windowSize.width, windowPos.y + windowSize.height)
 
-        -- Draw checkboxes
-        for _, box in pairs(checkboxes) do
-          gl.Color(1, 1, 1, 1) -- White color for box
-          gl.Rect(box.x, box.y, box.x + box.size, box.y + box.size)
-          if box.state then
-              gl.Color(0, 1, 0, 1) -- Green color for tick
-              gl.LineWidth(2)
-              glBeginEnd(GL.LINES, function()
-                  glVertex(box.x + 3, box.y + box.size - 3)
-                  glVertex(box.x + box.size - 3, box.y + 3)
-              end)
-              gl.LineWidth(1)
-          end
-          gl.Text(box.label, box.x + box.size + 10, box.y, 12)
+    -- Draw sliders
+    for _, slider in pairs(sliders) do
+      -- Draw the slider track
+      gl.Color(0.8, 0.8, 0.8, 1) -- Light grey color for track
+      gl.Rect(slider.x, slider.y, slider.x + slider.width, slider.y + 10) -- Adjust height as needed
+
+      -- Calculate knob position based on value
+      local knobX = slider.x + (slider.value - slider.min) / (slider.max - slider.min) * slider.width
+
+      -- Draw the slider knob
+      gl.Color(0, 0, 1, 1) -- Blue color for knob
+      gl.Rect(knobX - 5, slider.y - 5, knobX + 5, slider.y + 15) -- Adjust knob size as needed
+
+      -- Draw the label above the slider
+      local labelYOffset = 20  -- Increase this value to move the label higher
+      gl.Color(1, 1, 1, 1) -- White color for text
+      gl.Text(slider.label, slider.x, slider.y + labelYOffset, 12)
+    end
+
+    -- Draw checkboxes
+    for _, box in pairs(checkboxes) do
+      gl.Color(1, 1, 1, 1) -- White color for box
+      gl.Rect(box.x, box.y, box.x + box.size, box.y + box.size)
+      if box.state then
+        gl.Color(0, 1, 0, 1) -- Green color for tick
+        gl.LineWidth(2)
+        glBeginEnd(GL.LINES, function()
+          glVertex(box.x + 3, box.y + box.size - 3)
+          glVertex(box.x + box.size - 3, box.y + 3)
+        end)
+        gl.LineWidth(1)
+        
+        -- Change label color to green for enabled checkboxes
+        gl.Color(0, 1, 0, 1) -- Green color for text
+      else
+        -- Default label color for disabled checkboxes (white)
+        gl.Color(1, 1, 1, 1) -- White color for text
       end
+      
+      gl.Text(box.label, box.x + box.size + 10, box.y, 12)
+    end
   end
 end
+
+
 
 
 -- /////////////////////////////////////////// Handling UI Interactions
@@ -171,6 +207,14 @@ function widget:MousePress(x, y, button)
   if showUI then
       -- Existing button and slider interaction code...
 
+      -- Handle slider knob interactions
+      for key, slider in pairs(sliders) do
+        local knobX = slider.x + (slider.value - slider.min) / (slider.max - slider.min) * slider.width
+        if x >= knobX - 5 and x <= knobX + 5 and y >= slider.y - 5 and y <= slider.y + 15 then
+            activeSlider = slider  -- Set the active slider
+            return true  -- Indicate that the mouse press has been handled
+        end
+      end
       -- Handle checkbox interactions
       for key, box in pairs(checkboxes) do
           if isInsideRect(x, y, { x = box.x, y = box.y, width = box.size, height = box.size }) then
@@ -192,11 +236,18 @@ end
 
 
 function widget:MouseMove(x, y, dx, dy, button)
-  -- Handle mouse move events, especially for dragging the slider knob
+  function widget:MouseMove(x, y, dx, dy, button)
+    if activeSlider then
+        -- Calculate new value based on mouse x position
+        local newValue = ((x - activeSlider.x) / activeSlider.width) * (activeSlider.max - activeSlider.min) + activeSlider.min
+        newValue = math.max(math.min(newValue, activeSlider.max), activeSlider.min)  -- Clamp value
+        activeSlider.value = newValue  -- Update slider value
+    end
+end
 end
 
 function widget:MouseRelease(x, y, button)
-  -- Handle mouse release events if necessary
+  activeSlider = nil  -- Clear the active slider
 end
 
 -- /////////////////////////////////////////// ViewResize
