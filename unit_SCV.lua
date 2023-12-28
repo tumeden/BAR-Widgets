@@ -5,7 +5,7 @@ function widget:GetInfo()
     desc      = "Collects resources, and heals injured units.",
     author    = "Tumeden",
     date      = "2024",
-    version   = "v4.4",
+    version   = "v4.5",
     license   = "GNU GPL, v2 or later",
     layer     = 0,
     enabled   = true
@@ -32,7 +32,7 @@ local closeHealingThreshold = 300 -- Units within this range will prioritize hea
 
 -- /////////////////////////////////////////// Important things :))
 local widgetEnabled = true
-
+local resurrectingUnits = {}  -- table to keep track of units currently resurrecting
 local unitsToCollect = {}  -- table to keep track of units and their collection state
 local lastAvoidanceTime = {} -- Table to track the last avoidance time for each unit
 local healingUnits = {}  -- table to keep track of healing units
@@ -294,6 +294,11 @@ function processUnits(units)
           return
       end
 
+      -- Check if the unit is already tasked with resurrecting
+      if resurrectingUnits[unitID] then
+          return -- Skip this unit as it's already resurrecting something
+      end
+
       -- Check for nearby enemies and avoid if necessary
       local nearestEnemy, distance = findNearestEnemy(unitID, enemyAvoidanceRadius)
       if nearestEnemy and distance < enemyAvoidanceRadius then
@@ -304,10 +309,23 @@ function processUnits(units)
           return
       end
 
+      -- Check for resurrection task first
+      local resurrectableFeatures = resurrectNearbyDeadUnits(unitID, healResurrectRadius)
+      if #resurrectableFeatures > 0 then
+          local orders = generateOrders(resurrectableFeatures, false, nil)
+          for _, order in ipairs(orders) do
+              spGiveOrderToUnit(unitID, order[1], order[2], order[3])
+          end
+          unitData.taskType = "resurrecting"
+          unitData.taskStatus = "in_progress"
+          resurrectingUnits[unitID] = true  -- Mark unit as performing resurrection task
+          return -- Exit the function once a resurrection task is assigned
+      end
+
       local resourceNeed = assessResourceNeeds()
       local featureCollected = false
 
-      -- Prioritize resource collection if needed
+      -- Prioritize resource collection if no resurrection needed
       if resourceNeed ~= "none" then
           local x, y, z = spGetUnitPosition(unitID)
           if not x or not z then return nil end  -- Validate unit position
@@ -324,7 +342,7 @@ function processUnits(units)
           end
       end
 
-      -- If no resources needed or no features found, consider healing or other tasks
+      -- Consider healing if no resurrection or reclaiming is needed
       if not featureCollected then
           local nearestDamagedUnit, distance = findNearestDamagedFriendly(unitID, healResurrectRadius)
           if nearestDamagedUnit and distance < healResurrectRadius then
@@ -340,6 +358,7 @@ function processUnits(units)
       end
   end
 end
+
 
 
 -- /////////////////////////////////////////// findReclaimableFeature Function
@@ -524,8 +543,9 @@ function widget:UnitIdle(unitID)
           healingTargets[healedUnitID] = math.max(healingTargets[healedUnitID] - 1, 0)
       end
 
-      -- Remove the unit from healingUnits if it's there
+      -- Remove the unit from healingUnits and resurrectingUnits if it's there
       healingUnits[unitID] = nil
+      resurrectingUnits[unitID] = nil
   end
 end
 
@@ -600,4 +620,186 @@ function getFeatureResources(featureID)
   local featureDefID = spGetFeatureDefID(featureID)
   local featureDef = FeatureDefs[featureDefID]
   return featureDef.metal, featureDef.energy
+end
+
+
+
+
+
+
+
+
+-- /////////// TESTING STUFF 
+
+
+
+function filterFeatures(features)
+  local filteredFeatures = {}
+
+  -- Filter out trees, tombstones, etc.
+  for _, featureID in ipairs(features) do
+      local wreckageDefID = Spring.GetFeatureDefID(featureID)
+      local feature = FeatureDefs[wreckageDefID]
+
+      if feature.reclaimable and (feature.metal > 0) then
+          table.insert(filteredFeatures, featureID)
+      end
+  end
+
+  return filteredFeatures
+end
+
+function generateOrders(features, addToQueue, returnPos)
+  local orders = {}
+
+  for i, featureID in ipairs(features) do
+      local wreckageDefID = Spring.GetFeatureDefID(featureID)
+      local feature = FeatureDefs[wreckageDefID]
+
+      -- feature.resurrectable is nonzero for rocks etc. Checking for "corpses" is a workaround.
+      if feature.customParams["category"] == "corpses" then
+          table.insert(orders, {CMD.RESURRECT, featureID + Game.maxUnits, {shift = false}})
+      else -- We already filtered out non-reclaimable stuff.
+          table.insert(orders, {CMD.RECLAIM, featureID + Game.maxUnits, {shift = false}})
+      end
+
+      -- Break after the first order to ensure only one task is handled at a time
+      break
+  end
+
+  if returnPos then
+      table.insert(orders, {CMD.MOVE, returnPos, {shift = false}})
+  end
+
+  return orders
+end
+
+
+
+-- Calculates the 2D Euclidean distance between two points
+function dist2D(x1, z1, x2, z2)
+  return math.sqrt((x2 - x1) ^ 2 + (z2 - z1) ^ 2)
+end
+
+-- Computes the total distance of the path that visits all the features in the given order
+function computePathDistance(order, positions)
+  local distance = 0
+  for i = 2, #order do
+      local x1, _, z1 = unpack(positions[order[i - 1]])
+      local x2, _, z2 = unpack(positions[order[i]])
+      distance = distance + dist2D(x1, z1, x2, z2)
+  end
+  return distance
+end
+
+-- Applies the 2-opt heuristic to the given path to find a locally optimal solution
+function optimizePath(path, positions)
+  local improved = true
+  while improved do
+      improved = false
+      for i = 1, #path - 2 do
+          for j = i + 1, #path - 1 do
+              local order = {}
+              for k = 1, #path do
+                  if k < i or k > j then
+                      table.insert(order, path[k])
+                  end
+              end
+              for k = j, i, -1 do
+                  table.insert(order, path[k])
+              end
+              for k = j + 1, #path do
+                  table.insert(order, path[k])
+              end
+              local newDist = computePathDistance(order, positions)
+              local oldDist = computePathDistance(path, positions)
+              if newDist < oldDist then
+                  path = order
+                  improved = true
+              end
+          end
+      end
+  end
+  return path
+end
+
+-- Orders the featureIds by their optimal traversal path using the nearest neighbor algorithm and 2-opt heuristic
+function orderFeatureIdsByEfficientTraversalPath(unitId, featureIds, optimizedPathsCache)
+  -- Get the positions of the unit and features
+  local positions = {}
+  positions[unitId] = {Spring.GetUnitPosition(unitId)}
+  for _, id in ipairs(featureIds) do
+      positions[id] = {Spring.GetFeaturePosition(id)}
+  end
+
+  -- Apply the nearest neighbor algorithm to find a suboptimal solution
+  local path = {unitId}
+  local visited = {
+      [unitId] = true
+  }
+  local firstId = nil
+  while #path < #featureIds + 1 do
+      local bestDist = math.huge
+      local bestId = -1
+      for _, id in ipairs(featureIds) do
+          if not visited[id] then
+              local currentFeatureId = path[#path]
+              local currentFeaturePos = positions[currentFeatureId]
+              local nextFeaturePos = positions[id]
+              if not currentFeaturePos then
+                  Spring.Log("orderFeatureIdsByEfficientTraversalPath", LOG.ERROR,
+                      "currentFeaturePos is nil for currentFeatureId=" .. currentFeatureId)
+              elseif not nextFeaturePos then
+                  Spring.Log("orderFeatureIdsByEfficientTraversalPath", LOG.ERROR,
+                      "nextFeaturePos is nil for id=" .. id)
+              else
+                  local dist =
+                      dist2D(currentFeaturePos[1], currentFeaturePos[3], nextFeaturePos[1], nextFeaturePos[3])
+                  if dist < bestDist then
+                      bestDist = dist
+                      bestId = id
+                  end
+              end
+          end
+      end
+
+      -- Check the cache first time through. Cache is indexed by first nearest neighbor.
+      if firstId == nil then
+          firstId = bestId
+          if optimizedPathsCache[firstId] ~= nil then
+              return optimizedPathsCache[firstId]
+          end
+      end
+
+      table.insert(path, bestId)
+      visited[bestId] = true
+  end
+
+  -- Apply the 2-opt heuristic to improve the solution
+  path = optimizePath(path, positions)
+
+  -- Remove the starting unit from the path
+  table.remove(path, 1)
+
+  -- Return the ordered featureIds
+  local orderedFeatureIds = {}
+  for i, id in ipairs(path) do
+      orderedFeatureIds[i] = id
+  end
+
+  -- Add result to cache.
+  optimizedPathsCache[firstId] = orderedFeatureIds
+
+  return orderedFeatureIds
+end
+
+function resurrectNearbyDeadUnits(unitID, healResurrectRadius)
+  local x, y, z = spGetUnitPosition(unitID)
+  if not x or not z then return {} end
+
+  local features = Spring.GetFeaturesInCylinder(x, z, healResurrectRadius)
+  local filteredFeatures = filterFeatures(features)
+  local orderedFeatures = orderFeatureIdsByEfficientTraversalPath(unitID, filteredFeatures, {})
+
+  return orderedFeatures
 end
