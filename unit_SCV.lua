@@ -5,7 +5,7 @@ function widget:GetInfo()
     desc      = "Collects resources, and heals injured units.",
     author    = "Tumeden",
     date      = "2024",
-    version   = "v4.3",
+    version   = "v4.4",
     license   = "GNU GPL, v2 or later",
     layer     = 0,
     enabled   = true
@@ -193,7 +193,7 @@ end
 -- /////////////////////////////////////////// GameFrame Function
 function widget:GameFrame(currentFrame)
   -- Interval for checking stuck units
-  local stuckCheckInterval = 5000  -- Number of game frames to wait between checks
+  local stuckCheckInterval = 3000  -- Number of game frames to wait between checks
 
   -- Interval for avoidance and other actions
   local actionInterval = 60  -- Check every 60 frames (approximately 2 seconds at 30 FPS)
