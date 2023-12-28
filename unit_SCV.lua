@@ -199,32 +199,40 @@ function widget:GameFrame(currentFrame)
   local actionInterval = 60  -- Check every 60 frames (approximately 2 seconds at 30 FPS)
 
   if currentFrame % stuckCheckInterval == 0 then
-    -- Call handleStuckUnits for each unit here
-    for unitID, _ in pairs(unitsToCollect) do
-      local unitDefID = spGetUnitDefID(unitID)
-      local unitDef = UnitDefs[unitDefID]
-      if unitDef and (unitDef.canReclaim and unitDef.canResurrect) then
-        handleStuckUnits(unitID, unitDef)
+      -- Call handleStuckUnits for each unit here
+      for unitID, _ in pairs(unitsToCollect) do
+          local unitDefID = spGetUnitDefID(unitID)
+          local unitDef = UnitDefs[unitDefID]
+          if unitDef and (unitDef.canReclaim and unitDef.canResurrect) then
+              handleStuckUnits(unitID, unitDef)
+          end
       end
-    end
   end
 
   if currentFrame % actionInterval == 0 then
-    if widgetEnabled then
-      -- Replace retreatUnits with checkAndRetreatIfNeeded for each unit
-      for unitID, _ in pairs(unitsToCollect) do
-        checkAndRetreatIfNeeded(unitID, retreatRadius)
-      end
+      if widgetEnabled then
+          -- Replace retreatUnits with checkAndRetreatIfNeeded for each unit
+          for unitID, _ in pairs(unitsToCollect) do
+              checkAndRetreatIfNeeded(unitID, retreatRadius)
+          end
 
-      if not unitsToCollect then
-        unitsToCollect = {}
-      end
+          if not unitsToCollect then
+              unitsToCollect = {}
+          end
 
-      -- Find units that can collect resources
-      processUnits(unitsToCollect)
-    end
+          -- Find units that can collect resources
+          processUnits(unitsToCollect)
+
+          -- Reassign tasks to idle units
+          for unitID, unitData in pairs(unitsToCollect) do
+              if unitData.taskStatus == "idle" then
+                  processUnits({[unitID] = unitData})
+              end
+          end
+      end
   end
 end
+
 
 
 
@@ -494,29 +502,32 @@ function widget:UnitIdle(unitID)
   local unitDef = UnitDefs[unitDefID]
 
   if unitDef and (unitDef.canReclaim and unitDef.canResurrect) then
-    local unitData = unitsToCollect[unitID]
-    if not unitData then
-      unitData = { featureCount = 0, lastReclaimedFrame = 0, taskType = nil, taskStatus = "idle" }
-      unitsToCollect[unitID] = unitData
-    else
-      unitData.taskStatus = "idle"
-    end
+      local unitData = unitsToCollect[unitID]
+      if not unitData then
+          unitData = { featureCount = 0, lastReclaimedFrame = 0, taskStatus = "idle" }
+          unitsToCollect[unitID] = unitData
+      else
+          unitData.taskStatus = "idle"
+      end
 
-    -- Manage targeted features and healing units
-    local featureID = unitData.featureID
-    if featureID and targetedFeatures[featureID] then
-      targetedFeatures[featureID] = math.max(targetedFeatures[featureID] - 1, 0)
-    end
-    local healedUnitID = healingUnits[unitID]
-    if healedUnitID and healingTargets[healedUnitID] then
-      healingTargets[healedUnitID] = math.max(healingTargets[healedUnitID] - 1, 0)
-    end
+      -- Reassign task immediately
+      processUnits({[unitID] = unitData})
 
-    processUnits({[unitID] = unitData})
-    retreatingUnits[unitID] = nil
-    healingUnits[unitID] = nil
+      -- Manage targeted features and healing units
+      local featureID = unitData.featureID
+      if featureID and targetedFeatures[featureID] then
+          targetedFeatures[featureID] = math.max(targetedFeatures[featureID] - 1, 0)
+      end
+      local healedUnitID = healingUnits[unitID]
+      if healedUnitID and healingTargets[healedUnitID] then
+          healingTargets[healedUnitID] = math.max(healingTargets[healedUnitID] - 1, 0)
+      end
+
+      -- Remove the unit from healingUnits if it's there
+      healingUnits[unitID] = nil
   end
 end
+
 
 
 
@@ -541,28 +552,28 @@ function isUnitStuck(unitID)
 end
 
 
-
+-- ///////////////////////////////////////////  handleStuckUnits Function
 function handleStuckUnits(unitID, unitDef)
   -- Check if the unitDef is nil, and if so, retrieve it
   if not unitDef then
-    local unitDefID = spGetUnitDefID(unitID)
-    unitDef = UnitDefs[unitDefID]
+      local unitDefID = spGetUnitDefID(unitID)
+      unitDef = UnitDefs[unitDefID]
   end
 
   -- Ensure the unit has the capabilities (canReclaim, canResurrect)
   if unitDef and (unitDef.canReclaim and unitDef.canResurrect) then
-    if isUnitStuck(unitID) then
-      Spring.GiveOrderToUnit(unitID, CMD.STOP, {}, {})
-
-      -- Re-add the unit to the work list
-      unitsToCollect[unitID] = {
-        featureCount = 0,
-        lastReclaimedFrame = 0
-      }
-      processUnits({[unitID] = unitsToCollect[unitID]})
-    end
+      if isUnitStuck(unitID) then
+          -- Directly reassign task to the unit
+          unitsToCollect[unitID] = {
+              featureCount = 0,
+              lastReclaimedFrame = 0,
+              taskStatus = "idle"  -- Mark as idle so it can be reassigned
+          }
+          processUnits({[unitID] = unitsToCollect[unitID]})
+      end
   end
 end
+
 
 -- ///////////////////////////////////////////  assessResourceNeeds Function
 function assessResourceNeeds()
