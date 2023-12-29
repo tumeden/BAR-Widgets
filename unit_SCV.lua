@@ -2,7 +2,7 @@
 function widget:GetInfo()
   return {
     name      = "SCV",
-    desc      = "RezBots Resurrect, Collect resources, and heal injured units.",
+    desc      = "RezBots Resurrect, Collect resources, and heal injured units. Alt+C to open UI",
     author    = "Tumeden",
     date      = "2024",
     version   = "v5.6",
@@ -41,6 +41,7 @@ local reclaimRadius = 4000 -- Set your desired reclaim radius here (any number w
 local retreatRadius = 800  -- The detection area around the SCV unit, which causes it to retreat.
 local enemyAvoidanceRadius = 675  -- Adjust this value as needed -- Define a safe distance for enemy avoidance
 local avoidanceCooldown = 30 -- Cooldown in game frames, 30 Default.
+local cluster_range = 150
 
 -- engine call optimizations
 -- =========================
@@ -87,7 +88,9 @@ local SpringGetUnitHealth = Spring.GetUnitHealth
 local spGetGroundHeight = Spring.GetGroundHeight
 local spGetFeaturePosition = Spring.GetFeaturePosition
 local spGetUnitCommands = Spring.GetUnitCommands
-
+local CMD_MOVE = CMD.MOVE
+local CMD_RESURRECT = CMD.RESURRECT
+local CMD_RECLAIM = CMD.RECLAIM
 local glText = gl.Text
 local glRect = gl.Rect
 local glColor = gl.Color
@@ -982,7 +985,7 @@ end
 
 
 
-function filterFeatures(features)
+local function filterFeatures(features)
   local filteredFeatures = {}
 
   -- Filter out trees, tombstones, etc.
@@ -1026,12 +1029,12 @@ end
 
 
 -- Calculates the 2D Euclidean distance between two points
-function dist2D(x1, z1, x2, z2)
+local function dist2D(x1, z1, x2, z2)
   return math.sqrt((x2 - x1) ^ 2 + (z2 - z1) ^ 2)
 end
 
 -- Computes the total distance of the path that visits all the features in the given order
-function computePathDistance(order, positions)
+local function computePathDistance(order, positions)
   local distance = 0
   for i = 2, #order do
       local x1, _, z1 = unpack(positions[order[i - 1]])
@@ -1042,7 +1045,7 @@ function computePathDistance(order, positions)
 end
 
 -- Applies the 2-opt heuristic to the given path to find a locally optimal solution
-function optimizePath(path, positions)
+local function optimizePath(path, positions)
   local improved = true
   while improved do
       improved = false
