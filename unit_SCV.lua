@@ -5,7 +5,7 @@ function widget:GetInfo()
     desc      = "RezBots Resurrect, Collect resources, and heal injured units.",
     author    = "Tumeden",
     date      = "2024",
-    version   = "v5.0",
+    version   = "v5.1",
     license   = "GNU GPL, v2 or later",
     layer     = 0,
     enabled   = true
@@ -46,6 +46,8 @@ local avoidanceCooldown = 30 -- Cooldown in game frames, 30 Default.
 
 -- engine call optimizations
 -- =========================
+local armRectrDefID
+local corNecroDefID
 local spGetUnitDefID = Spring.GetUnitDefID
 local spGiveOrderToUnit = Spring.GiveOrderToUnit
 local spGetUnitPosition = Spring.GetUnitPosition
@@ -280,49 +282,44 @@ function widget:Initialize()
     widgetHandler:RemoveWidget(self)
     return
   end
-  -- Define rezbots unit definition IDs
-  local armRectrDefID, corNecroDefID
 
-  -- Check and store the UnitDefIDs for the rezbots
+  -- Define rezbots unit definition IDs
+  -- These are now local to the widget but outside of the Initialize function
+  -- to be accessible to the whole widget file.
   if UnitDefNames and UnitDefNames.armrectr and UnitDefNames.cornecro then
       armRectrDefID = UnitDefNames.armrectr.id
       corNecroDefID = UnitDefNames.cornecro.id
   else
       -- Handle the case where UnitDefNames are not available or units are undefined
       Spring.Echo("Rezbot UnitDefIDs could not be determined")
-      widgetHandler:RemoveWidget(self)
+      widgetHandler:RemoveWidget()
       return
   end
 
-  -- Store rezbots UnitDefIDs globally within the widget for later use
-  self.armRectrDefID = armRectrDefID
-  self.corNecroDefID = corNecroDefID
+  -- You can add any additional initialization code here if needed
+
 end
+
 
 
 -- ///////////////////////////////////////////  UnitCreated Function
 function widget:UnitCreated(unitID, unitDefID, unitTeam)
-  -- Check if the unit is a rezbot
-  if unitDefID ~= self.armRectrDefID and unitDefID ~= self.corNecroDefID then
-    -- Skip processing for non-rezbots
-    return
+  -- Add the unit to unitsToCollect only if it's a rezbot
+  if unitDefID == armRectrDefID or unitDefID == corNecroDefID then
+    unitsToCollect[unitID] = {
+      featureCount = 0,
+      lastReclaimedFrame = 0
+    }
+    processUnits({[unitID] = unitsToCollect[unitID]})
+  end
 end
 
-  local unitDef = UnitDefs[unitDefID]
-      -- Initialize unit to collect resources
-      unitsToCollect[unitID] = {
-          featureCount = 0,
-          lastReclaimedFrame = 0
-      }
-
-      processUnits({[unitID] = unitsToCollect[unitID]})
-end
 
 
 -- ///////////////////////////////////////////  UnitDestroyed Function
 function widget:UnitDestroyed(unitID, unitDefID, unitTeam)
   -- Check if the unit is a rezbot
-  if unitDefID == self.armRectrDefID or unitDefID == self.corNecroDefID then
+  if unitDefID == armRectrDefID or unitDefID == corNecroDefID then
       unitsToCollect[unitID] = nil
 
       local units = Spring.GetTeamUnits(Spring.GetMyTeamID())
@@ -331,7 +328,7 @@ function widget:UnitDestroyed(unitID, unitDefID, unitTeam)
           local uDef = UnitDefs[uDefID]
           local unitCommands = Spring.GetUnitCommands(uID, 1)
 
-          if uID ~= unitID and uDefID == self.armRectrDefID or uDefID == self.corNecroDefID and (not unitCommands or #unitCommands == 0) then
+          if uID ~= unitID and uDefID == armRectrDefID or uDefID == corNecroDefID and (not unitCommands or #unitCommands == 0) then
               unitsToCollect[uID] = { featureCount = 0, lastReclaimedFrame = 0 }
               processUnits({[uID] = unitsToCollect[uID]})
               break
@@ -356,7 +353,6 @@ function widget:FeatureDestroyed(featureID, allyTeam)
 end
 
 
-
 -- /////////////////////////////////////////// GameFrame Function
 function widget:GameFrame(currentFrame)
   -- Interval for checking stuck units
@@ -366,7 +362,7 @@ function widget:GameFrame(currentFrame)
   local actionInterval = 60  -- Check every 60 frames (approximately 2 seconds at 30 FPS)
 
   -- Handle stuck units
-  if currentFrame % stuckCheckInterval == 0 then
+  if unitDefID == armRectrDefID or unitDefID == corNecroDefID and currentFrame % stuckCheckInterval == 0 then
       for unitID, _ in pairs(unitsToCollect) do
           local unitDefID = spGetUnitDefID(unitID)
           local unitDef = UnitDefs[unitDefID]
@@ -378,7 +374,7 @@ function widget:GameFrame(currentFrame)
 
   -- Regular actions performed at specified intervals
   if currentFrame % actionInterval == 0 then
-      if widgetEnabled then
+      if widgetEnabled and unitDefID == armRectrDefID or unitDefID == corNecroDefID then
           for unitID, _ in pairs(unitsToCollect) do
               -- Check if unit is valid and exists
               if Spring.ValidUnitID(unitID) and not Spring.GetUnitIsDead(unitID) then
@@ -393,15 +389,12 @@ function widget:GameFrame(currentFrame)
 end
 
 
-
-
-
 -- ///////////////////////////////////////////  avoidEnemy Function
 function avoidEnemy(unitID, enemyID)
   local currentTime = Spring.GetGameFrame()
 
   -- Check if the unit is still in cooldown period
-  if lastAvoidanceTime[unitID] and (currentTime - lastAvoidanceTime[unitID]) < avoidanceCooldown then
+  if unitDefID == armRectrDefID or unitDefID == corNecroDefID and lastAvoidanceTime[unitID] and (currentTime - lastAvoidanceTime[unitID]) < avoidanceCooldown then
     return -- Skip avoidance if still in cooldown
   end
 
@@ -422,6 +415,7 @@ function avoidEnemy(unitID, enemyID)
   local safeY = Spring.GetGroundHeight(safeX, safeZ)
 
   -- Issue a move order to the safe destination
+  
   spGiveOrderToUnit(unitID, CMD.MOVE, {safeX, safeY, safeZ}, {})
 
   -- Update the last avoidance time for this unit
@@ -663,20 +657,20 @@ end
 
 -- ///////////////////////////////////////////  checkAndRetreatIfNeeded Function
 function checkAndRetreatIfNeeded(unitID, retreatRadius)
+  local unitDefID = spGetUnitDefID(unitID)
   local nearestEnemy, distance = findNearestEnemy(unitID, retreatRadius)
 
-  -- Check if the unit is not a commander or a construction bot before retreating
-  local unitDefID = spGetUnitDefID(unitID)
-  if unitDefID ~= armComDefID and unitDefID ~= corComDefID then
-    local unitDef = UnitDefs[unitDefID]
-    if unitDef and not unitDef.isBuilder then
-      if nearestEnemy and distance < retreatRadius then
-        -- Process avoidance and retreat in a unified manner
-        avoidEnemy(unitID, nearestEnemy, distance)
-      end
+  -- Only execute retreat logic if the unit is a rezbot
+  if unitDefID == armRectrDefID or unitDefID == corNecroDefID then
+    if nearestEnemy and distance < retreatRadius then
+      -- Issue the move order only if the unit should retreat
+      avoidEnemy(unitID, nearestEnemy, distance)
     end
   end
 end
+
+
+
 
 
 
