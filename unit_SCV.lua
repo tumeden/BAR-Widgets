@@ -42,6 +42,7 @@ local healingTargets = {}  -- Track which units are being healed and by how many
 local maxHealersPerUnit = 4  -- Maximum number of healers per unit
 local unitTaskStatus = {}
 local CMD_RECLAIM = CMD.RECLAIM
+
 local avoidanceCooldown = 30 -- Cooldown in game frames, 30 Default.
 
 -- engine call optimizations
@@ -54,6 +55,12 @@ local spGetUnitPosition = Spring.GetUnitPosition
 local spGetFeaturesInCylinder = Spring.GetFeaturesInCylinder
 local spGetFeatureDefID = Spring.GetFeatureDefID
 local spGetMyTeamID = Spring.GetMyTeamID
+
+local spEcho = Spring.Echo
+local spGetUnitHealth = Spring.GetUnitHealth
+local spGetUnitsInCylinder = Spring.GetUnitsInCylinder
+local spGetUnitIsDead = Spring.GetUnitIsDead
+local spValidUnitID = Spring.ValidUnitID
 local spGetTeamResources = Spring.GetTeamResources
 local SpringGetUnitDefID = Spring.GetUnitDefID
 local SpringGetUnitTeam = Spring.GetUnitTeam
@@ -80,6 +87,16 @@ local SpringIsSphereInView = Spring.IsSphereInView
 local SpringGetTeamList = Spring.GetTeamList
 local SpringGetTeamInfo = Spring.GetTeamInfo
 local SpringGetUnitHealth = Spring.GetUnitHealth
+local spGetGroundHeight = Spring.GetGroundHeight
+local spGetFeaturePosition = Spring.GetFeaturePosition
+local spGetUnitCommands = Spring.GetUnitCommands
+
+local glText = gl.Text
+local glRect = gl.Rect
+local glColor = gl.Color
+local glTranslate = gl.Translate
+local glPushMatrix = gl.PushMatrix
+local glPopMatrix = gl.PopMatrix
 local glDeleteList = gl.DeleteList
 local glCreateList = gl.CreateList
 local glCallList = gl.CallList
@@ -91,12 +108,24 @@ local glVertex = gl.Vertex
 local glBeginEnd = gl.BeginEnd
 local glLineWidth = gl.LineWidth
 local glScale = gl.Scale
-
+local sqrt = math.sqrt
+local pow = math.pow
+local mathMax = math.max
+local mathMin = math.min
+local mathAbs = math.abs
+local mathSqrt = math.sqrt
 local mathPi = math.pi
 local mathCos = math.cos
 local mathSin = math.sin
 local mathFloor = math.floor
+local tblInsert = table.insert
+local tblRemove = table.remove
+local tblSort = table.sort
+local strFormat = string.format
+local strSub = string.sub
 
+local findNearestEnemy = findNearestEnemy
+local getFeatureResources = getFeatureResources
 
 
 
@@ -149,7 +178,6 @@ function widget:KeyPress(key, mods, isRepeat)
 end
 
 
--- /////////////////////////////////////////// Drawing the UI
 -- /////////////////////////////////////////// Drawing the UI
 function widget:DrawScreen()
   if showUI then
