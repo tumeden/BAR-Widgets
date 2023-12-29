@@ -2,7 +2,7 @@
 function widget:GetInfo()
   return {
     name      = "SCV",
-    desc      = "RezBots Resurrect, Collect resources, and heal injured units. F8 to open UI",
+    desc      = "RezBots Resurrect, Collect resources, and heal injured units. alt+c to open UI",
     author    = "Tumeden",
     date      = "2024",
     version   = "v5.6",
@@ -219,7 +219,7 @@ end
 
 -- /////////////////////////////////////////// KeyPress Function Modification
 function widget:KeyPress(key, mods, isRepeat)
-  if key == 0x121 then -- 0x121 is the code for f8
+  if key == 0x0063 and mods.alt then -- 0x0063 is the key code for "c"
       showUI = not showUI
       return true
   end
