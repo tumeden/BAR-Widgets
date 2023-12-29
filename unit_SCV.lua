@@ -5,7 +5,7 @@ function widget:GetInfo()
     desc      = "RezBots Resurrect, Collect resources, and heal injured units.",
     author    = "Tumeden",
     date      = "2024",
-    version   = "v5.1",
+    version   = "v5.2",
     license   = "GNU GPL, v2 or later",
     layer     = 0,
     enabled   = true
@@ -266,15 +266,25 @@ end
 
 
 function widget:MouseMove(x, y, dx, dy, button)
-  function widget:MouseMove(x, y, dx, dy, button)
-    if activeSlider then
-        -- Calculate new value based on mouse x position
-        local newValue = ((x - activeSlider.x) / activeSlider.width) * (activeSlider.max - activeSlider.min) + activeSlider.min
-        newValue = math.max(math.min(newValue, activeSlider.max), activeSlider.min)  -- Clamp value
-        activeSlider.value = newValue  -- Update slider value
-    end
+  if activeSlider then
+      -- Calculate new value based on mouse x position
+      local newValue = ((x - activeSlider.x) / activeSlider.width) * (activeSlider.max - activeSlider.min) + activeSlider.min
+      newValue = math.max(math.min(newValue, activeSlider.max), activeSlider.min)  -- Clamp value
+      activeSlider.value = newValue  -- Update slider value
+
+      -- Update corresponding variable
+      if activeSlider == sliders.healResurrectRadius then
+          healResurrectRadius = newValue
+      elseif activeSlider == sliders.reclaimRadius then
+          reclaimRadius = newValue
+      elseif activeSlider == sliders.retreatRadius then
+          retreatRadius = newValue
+      elseif activeSlider == sliders.enemyAvoidanceRadius then
+          enemyAvoidanceRadius = newValue
+      end
+  end
 end
-end
+
 
 function widget:MouseRelease(x, y, button)
   activeSlider = nil  -- Clear the active slider
