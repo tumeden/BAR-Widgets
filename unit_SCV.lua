@@ -5,7 +5,7 @@ function widget:GetInfo()
     desc      = "RezBots Resurrect, Collect resources, and heal injured units.",
     author    = "Tumeden",
     date      = "2024",
-    version   = "v5.5",
+    version   = "v5.6",
     license   = "GNU GPL, v2 or later",
     layer     = 0,
     enabled   = true
@@ -168,9 +168,9 @@ end
 -- Function to determine the dominant unit type
 function DetermineDominantUnitType(armRectrCount, corNecroCount)
   if armRectrCount > corNecroCount then
-      return "Rezbots", armRectrCount
+      return "Rezbot", armRectrCount
   else
-      return "Rezbots", corNecroCount
+      return "Rezbot", corNecroCount
   end
 end
 
@@ -227,28 +227,78 @@ end
 -- /////////////////////////////////////////// Drawing the UI
 function widget:DrawScreen()
   if showUI then
-    -- Draw the window background
-    gl.Color(0, 0, 0, 0.7)
-    gl.Rect(windowPos.x, windowPos.y, windowPos.x + windowSize.width, windowPos.y + windowSize.height)
-        -- Update and get the unit count
-        local armRectrCount, corNecroCount = CountUnitTypes()
-        local dominantUnitType, dominantCount = DetermineDominantUnitType(armRectrCount, corNecroCount)
+    -- Style configuration
+    local mainBgColor = {0, 0, 0, 0.8}
+    local statsBgColor = {0.05, 0.05, 0.05, 0.85}
+    local borderColor = {0.7, 0.7, 0.7, 0.5}
+    local labelColor = {0.9, 0.9, 0.9, 1}
+    local valueColor = {1, 1, 0, 1}
+    local fontSize = 14
+    local lineHeight = fontSize * 1.5
+    local padding = 10
 
-        -- Display the unit count at the top of the UI box
-        local displayText = "Rezbots detected by Widget: " .. dominantCount
-        local textX = windowPos.x + 10 -- Adjust as needed for horizontal position
-        local textY = windowPos.y + 20 -- Adjust as needed for vertical position
-        gl.Color(1, 1, 1, 1) -- White color for text
-        gl.Text(displayText, textX, textY, 12) -- Draw the text
+    -- Main box configuration
+    local mainBoxWidth = vsx * 0.3
+    local mainBoxHeight = vsy * 0.5
+    local mainBoxX = (vsx - mainBoxWidth) / 2
+    local mainBoxY = (vsy + mainBoxHeight) / 2
 
-        -- Get task counts
-        local healingCount, resurrectingCount, collectingCount = CountTaskEngagements()
+    -- Stats box configuration
+    local statsBoxWidth = mainBoxWidth * 0.4
+    local statsBoxHeight = lineHeight * 6
+    local statsBoxX = mainBoxX + padding
+    local statsBoxY = mainBoxY - padding
 
-        -- Display task counts
-        local taskInfoY = textY + 30  -- Position below the unit count
-        local taskInfoText = string.format("Healing: %d, Resurrecting: %d, Collecting: %d", healingCount, resurrectingCount, collectingCount)
-        gl.Color(1, 1, 1, 1) -- White color for text
-        gl.Text(taskInfoText, textX, taskInfoY, 12) -- Draw the text
+    -- Function to draw a bordered box
+    local function drawBorderedBox(x1, y1, x2, y2, bgColor, borderColor)
+      gl.Color(unpack(bgColor))
+      gl.Rect(x1, y1, x2, y2)
+      gl.Color(unpack(borderColor))
+      gl.PolygonMode(GL.FRONT_AND_BACK, GL.LINE)
+      gl.Rect(x1, y1, x2, y2)
+      gl.PolygonMode(GL.FRONT_AND_BACK, GL.FILL)
+    end
+
+    -- Draw the main background box
+    drawBorderedBox(mainBoxX, mainBoxY - mainBoxHeight, mainBoxX + mainBoxWidth, mainBoxY, mainBgColor, borderColor)
+
+    -- Draw the statistics box
+    drawBorderedBox(statsBoxX, statsBoxY - statsBoxHeight, statsBoxX + statsBoxWidth, statsBoxY, statsBgColor, borderColor)
+
+    -- Retrieve and draw stats
+    local armRectrCount, corNecroCount = CountUnitTypes()
+    local dominantUnitType, dominantCount = DetermineDominantUnitType(armRectrCount, corNecroCount)
+    local healingCount, resurrectingCount, collectingCount = CountTaskEngagements()
+
+    local statsTextX = statsBoxX + padding
+    local statsTextY = statsBoxY - lineHeight
+
+    -- Labels and values for stats
+    local statsLabels = {
+      "Workers Name:",
+      "Unit Count:",
+      "Healing Count:",
+      "Resurrecting Count:",
+      "Collecting Count:"
+    }
+    local statsValues = {
+      dominantUnitType,
+      dominantCount,
+      healingCount,
+      resurrectingCount,
+      collectingCount
+    }
+
+    -- Drawing stats text
+    for i = 1, #statsLabels do
+      gl.Color(unpack(labelColor))
+      gl.Text(statsLabels[i], statsTextX, statsTextY, fontSize, 'o')
+      gl.Color(unpack(valueColor))
+      gl.Text(statsValues[i], statsTextX + statsBoxWidth - padding, statsTextY, fontSize, 'or')
+      statsTextY = statsTextY - lineHeight
+    end
+
+        
     -- Draw sliders
     for _, slider in pairs(sliders) do
       -- Draw the slider track
