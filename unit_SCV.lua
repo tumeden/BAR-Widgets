@@ -346,7 +346,6 @@ end
 
 -- ///////////////////////////////////////////  UnitCreated Function
 function widget:UnitCreated(unitID, unitDefID, unitTeam)
-  -- Add the unit to unitsToCollect only if it's a rezbot
   if unitDefID == armRectrDefID or unitDefID == corNecroDefID then
     unitsToCollect[unitID] = {
       featureCount = 0,
@@ -359,25 +358,22 @@ end
 
 
 -- ///////////////////////////////////////////  UnitDestroyed Function
-function widget:UnitDestroyed(unitID, unitDefID, unitTeam)
-  -- Check if the unit is a rezbot
-  if unitDefID == armRectrDefID or unitDefID == corNecroDefID then
-      unitsToCollect[unitID] = nil
-
-      local units = Spring.GetTeamUnits(Spring.GetMyTeamID())
-      for _, uID in ipairs(units) do
-          local uDefID = spGetUnitDefID(uID)
-          local uDef = UnitDefs[uDefID]
-          local unitCommands = Spring.GetUnitCommands(uID, 1)
-
-          if uID ~= unitID and uDefID == armRectrDefID or uDefID == corNecroDefID and (not unitCommands or #unitCommands == 0) then
-              unitsToCollect[uID] = { featureCount = 0, lastReclaimedFrame = 0 }
-              processUnits({[uID] = unitsToCollect[uID]})
-              break
-          end
+function widget:FeatureDestroyed(featureID, allyTeam)
+  for unitID, data in pairs(unitsToCollect) do
+    local unitDefID = spGetUnitDefID(unitID)
+    if unitDefID == armRectrDefID or unitDefID == corNecroDefID then
+      if data.featureID == featureID then
+        data.featureID = nil
+        data.lastReclaimedFrame = Spring.GetGameFrame()
+        data.taskStatus = "completed"  -- Marking the task as completed
+        processUnits(unitsToCollect)
+        break
       end
+    end
   end
+  targetedFeatures[featureID] = nil  -- Clear the target as the feature is destroyed
 end
+
 
 
 -- ///////////////////////////////////////////  FeatureDestroyed Function
@@ -403,82 +399,89 @@ function widget:GameFrame(currentFrame)
   -- Interval for avoidance and other actions
   local actionInterval = 60  -- Check every 60 frames (approximately 2 seconds at 30 FPS)
 
-  -- Handle stuck units
-  if unitDefID == armRectrDefID or unitDefID == corNecroDefID and currentFrame % stuckCheckInterval == 0 then
-      for unitID, _ in pairs(unitsToCollect) do
-          local unitDefID = spGetUnitDefID(unitID)
-          local unitDef = UnitDefs[unitDefID]
-          if unitDef and (unitDef.canReclaim and unitDef.canResurrect) and Spring.ValidUnitID(unitID) and not Spring.GetUnitIsDead(unitID) then
-              handleStuckUnits(unitID, unitDef)
-          end
+  -- Handle stuck units for RezBots
+  if currentFrame % stuckCheckInterval == 0 then
+    for unitID, _ in pairs(unitsToCollect) do
+      local unitDefID = spGetUnitDefID(unitID)
+      if unitDefID == armRectrDefID or unitDefID == corNecroDefID then
+        local unitDef = UnitDefs[unitDefID]
+        if unitDef and (unitDef.canReclaim and unitDef.canResurrect) and Spring.ValidUnitID(unitID) and not Spring.GetUnitIsDead(unitID) then
+          handleStuckUnits(unitID, unitDef)
+        end
       end
+    end
   end
 
-  -- Regular actions performed at specified intervals
+  -- Regular actions performed at specified intervals for RezBots
   if currentFrame % actionInterval == 0 then
-      if widgetEnabled and unitDefID == armRectrDefID or unitDefID == corNecroDefID then
-          for unitID, _ in pairs(unitsToCollect) do
-              -- Check if unit is valid and exists
-              if Spring.ValidUnitID(unitID) and not Spring.GetUnitIsDead(unitID) then
-                  checkAndRetreatIfNeeded(unitID, retreatRadius)
+    for unitID, _ in pairs(unitsToCollect) do
+      local unitDefID = spGetUnitDefID(unitID)
+      if unitDefID == armRectrDefID or unitDefID == corNecroDefID then
+        if Spring.ValidUnitID(unitID) and not Spring.GetUnitIsDead(unitID) then
+          checkAndRetreatIfNeeded(unitID, retreatRadius)
 
-                  -- Process units for tasks like collecting, healing, and resurrecting
-                  processUnits({[unitID] = unitsToCollect[unitID]})
-              end
-          end
+          -- Process units for tasks like collecting, healing, and resurrecting
+          processUnits({[unitID] = unitsToCollect[unitID]})
+        end
       end
+    end
   end
 end
+
 
 
 -- ///////////////////////////////////////////  avoidEnemy Function
 function avoidEnemy(unitID, enemyID)
   local currentTime = Spring.GetGameFrame()
 
-  -- Check if the unit is still in cooldown period
-  if unitDefID == armRectrDefID or unitDefID == corNecroDefID and lastAvoidanceTime[unitID] and (currentTime - lastAvoidanceTime[unitID]) < avoidanceCooldown then
-    return -- Skip avoidance if still in cooldown
+  -- Retrieve unitDefID for the unit
+  local unitDefID = spGetUnitDefID(unitID)
+
+  -- Check if the unit is a RezBot
+  if unitDefID == armRectrDefID or unitDefID == corNecroDefID then
+    -- Check if the unit is still in cooldown period
+    if lastAvoidanceTime[unitID] and (currentTime - lastAvoidanceTime[unitID]) < avoidanceCooldown then
+      return -- Skip avoidance if still in cooldown
+    end
+
+    local ux, uy, uz = spGetUnitPosition(unitID)
+    local ex, ey, ez = spGetUnitPosition(enemyID)
+
+    -- Calculate a direction vector away from the enemy
+    local dx, dz = ux - ex, uz - ez
+    local magnitude = math.sqrt(dx * dx + dz * dz)
+
+    -- Adjusted safe distance calculation
+    local safeDistanceMultiplier = 0.5  -- Retreat half the distance of the avoidance radius
+    local safeDistance = enemyAvoidanceRadius * safeDistanceMultiplier
+
+    -- Calculate a safe destination
+    local safeX = ux + (dx / magnitude * safeDistance)
+    local safeZ = uz + (dz / magnitude * safeDistance)
+    local safeY = Spring.GetGroundHeight(safeX, safeZ)
+
+    -- Issue a move order to the safe destination
+    spGiveOrderToUnit(unitID, CMD.MOVE, {safeX, safeY, safeZ}, {})
+
+    -- Update the last avoidance time for this unit
+    lastAvoidanceTime[unitID] = currentTime
   end
-
-  local ux, uy, uz = spGetUnitPosition(unitID)
-  local ex, ey, ez = spGetUnitPosition(enemyID)
-
-  -- Calculate a direction vector away from the enemy
-  local dx, dz = ux - ex, uz - ez
-  local magnitude = math.sqrt(dx * dx + dz * dz)
-
-  -- Adjusted safe distance calculation
-  local safeDistanceMultiplier = 0.5  -- Retreat half the distance of the avoidance radius
-  local safeDistance = enemyAvoidanceRadius * safeDistanceMultiplier
-
-  -- Calculate a safe destination
-  local safeX = ux + (dx / magnitude * safeDistance)
-  local safeZ = uz + (dz / magnitude * safeDistance)
-  local safeY = Spring.GetGroundHeight(safeX, safeZ)
-
-  -- Issue a move order to the safe destination
-  
-  spGiveOrderToUnit(unitID, CMD.MOVE, {safeX, safeY, safeZ}, {})
-
-  -- Update the last avoidance time for this unit
-  lastAvoidanceTime[unitID] = currentTime
 end
 
 
 
--- ///////////////////////////////////////////  processUnits Function
 -- /////////////////////////////////////////// processUnits Function
 function processUnits(units)
   for unitID, unitData in pairs(units) do
+    local unitDefID = spGetUnitDefID(unitID)
+    if unitDefID == armRectrDefID or unitDefID == corNecroDefID then
       -- Check if unit is valid and exists
       if not Spring.ValidUnitID(unitID) or Spring.GetUnitIsDead(unitID) then
           return -- Skip invalid or dead units
       end
 
-      local unitDefID = spGetUnitDefID(unitID)
-      -- Check if the unit is a commander
-      if unitDefID == UnitDefNames.armcom.id or unitDefID == UnitDefNames.corcom.id then
-          -- Skip processing for commanders
+      -- Skip if the unit is currently engaged in a task
+      if unitData.taskStatus == "in_progress" then
           return
       end
 
@@ -561,7 +564,7 @@ function processUnits(units)
         end
     end
 end
-
+end
 
 
 -- /////////////////////////////////////////// findReclaimableFeature Function
@@ -811,9 +814,8 @@ function handleStuckUnits(unitID, unitDef)
       unitDef = UnitDefs[unitDefID]
   end
 
-  -- Ensure the unit has the capabilities (canReclaim, canResurrect)
-  if unitDef and (unitDef.canReclaim and unitDef.canResurrect) then
-      if isUnitStuck(unitID) then
+  if unitDefID == armRectrDefID or unitDefID == corNecroDefID then
+    if isUnitStuck(unitID) then
           -- Directly reassign task to the unit
           unitsToCollect[unitID] = {
               featureCount = 0,
