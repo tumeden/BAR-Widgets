@@ -2,7 +2,7 @@
 function widget:GetInfo()
   return {
     name      = "SCV",
-    desc      = "RezBots Resurrect, Collect resources, and heal injured units. Alt+C to open UI",
+    desc      = "RezBots Resurrect, Collect resources, and heal injured units. F8 to open UI",
     author    = "Tumeden",
     date      = "2024",
     version   = "v5.6",
@@ -219,12 +219,13 @@ end
 
 -- /////////////////////////////////////////// KeyPress Function Modification
 function widget:KeyPress(key, mods, isRepeat)
-  if key == 0x0063 and mods.alt then -- 0x0063 is the key code for "c"
+  if key == 0x121 then -- 0x121 is the code for f8
       showUI = not showUI
       return true
   end
   return false
 end
+
 
 
 -- /////////////////////////////////////////// Drawing the UI
@@ -1019,9 +1020,6 @@ function generateOrders(features, addToQueue, returnPos)
       break
   end
 
-  if returnPos then
-      table.insert(orders, {CMD.MOVE, returnPos, {shift = false}})
-  end
 
   return orders
 end
