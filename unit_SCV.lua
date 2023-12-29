@@ -5,7 +5,7 @@ function widget:GetInfo()
     desc      = "RezBots Resurrect, Collect resources, and heal injured units.",
     author    = "Tumeden",
     date      = "2024",
-    version   = "v5.2",
+    version   = "v5.3",
     license   = "GNU GPL, v2 or later",
     layer     = 0,
     enabled   = true
@@ -13,12 +13,6 @@ function widget:GetInfo()
 end
 
 
--- ///////////////////////////////////////////  Adjustable variables, to suit the widget users preference
-
-local healResurrectRadius = 1000 -- Set your desired heal/resurrect radius here  (default 1000,  anything larger will cause significant lag)
-local reclaimRadius = 4000 -- Set your desired reclaim radius here (any number works, 4000 is about half a large map)
-local retreatRadius = 800  -- The detection area around the SCV unit, which causes it to retreat.
-local enemyAvoidanceRadius = 675  -- Adjust this value as needed -- Define a safe distance for enemy avoidance
 
 
 -- /////////////////////////////////////////// ---- /////////////////////////////////////////// ---- /////////////////////////////////////////// 
@@ -42,7 +36,10 @@ local healingTargets = {}  -- Track which units are being healed and by how many
 local maxHealersPerUnit = 4  -- Maximum number of healers per unit
 local unitTaskStatus = {}
 local CMD_RECLAIM = CMD.RECLAIM
-
+local healResurrectRadius = 1000 -- Set your desired heal/resurrect radius here  (default 1000,  anything larger will cause significant lag)
+local reclaimRadius = 4000 -- Set your desired reclaim radius here (any number works, 4000 is about half a large map)
+local retreatRadius = 800  -- The detection area around the SCV unit, which causes it to retreat.
+local enemyAvoidanceRadius = 675  -- Adjust this value as needed -- Define a safe distance for enemy avoidance
 local avoidanceCooldown = 30 -- Cooldown in game frames, 30 Default.
 
 -- engine call optimizations
@@ -144,16 +141,16 @@ local vsx, vsy = Spring.GetViewGeometry() -- Screen dimensions
 local windowPos = { x = (vsx - windowSize.width) / 2, y = (vsy - windowSize.height) / 2 } -- Center the window
 
 local checkboxes = {
-  healing = { x = windowPos.x + 30, y = windowPos.y + 50, size = 20, state = false, label = "Enable Healing" },
-  resurrecting = { x = windowPos.x + 30, y = windowPos.y + 80, size = 20, state = false, label = "Enable Resurrecting" },
-  collecting = { x = windowPos.x + 30, y = windowPos.y + 110, size = 20, state = false, label = "Enable Collecting" },
+  healing = { x = windowPos.x + 30, y = windowPos.y + 50, size = 20, state = false, label = "Healing" },
+  resurrecting = { x = windowPos.x + 30, y = windowPos.y + 80, size = 20, state = false, label = "Resurrect" },
+  collecting = { x = windowPos.x + 30, y = windowPos.y + 110, size = 20, state = false, label = "Resource Collection" },
 }
 
 local sliders = {
-  healResurrectRadius = { x = windowPos.x + 50, y = windowPos.y + 200, width = 200, value = healResurrectRadius, min = 100, max = 2000, label = "Heal/Resurrect Radius" },
-  reclaimRadius = { x = windowPos.x + 50, y = windowPos.y + 230, width = 200, value = reclaimRadius, min = 100, max = 4000, label = "Reclaim Radius" },
-  retreatRadius = { x = windowPos.x + 50, y = windowPos.y + 260, width = 200, value = retreatRadius, min = 100, max = 1000, label = "Retreat Radius" },
-  enemyAvoidanceRadius = { x = windowPos.x + 50, y = windowPos.y + 290, width = 200, value = enemyAvoidanceRadius, min = 100, max = 1000, label = "Enemy Avoidance Radius" },
+  healResurrectRadius = { x = windowPos.x + 50, y = windowPos.y + 200, width = 200, value = healResurrectRadius, min = 0, max = 2000, label = "Heal/Resurrect Radius" },
+  reclaimRadius = { x = windowPos.x + 50, y = windowPos.y + 230, width = 200, value = reclaimRadius, min = 0, max = 5000, label = "Resource Collection Radius" },
+  retreatRadius = { x = windowPos.x + 50, y = windowPos.y + 260, width = 200, value = retreatRadius, min = 0, max = 2000, label = "Retreat Distance" },
+  enemyAvoidanceRadius = { x = windowPos.x + 50, y = windowPos.y + 290, width = 200, value = enemyAvoidanceRadius, min = 0, max = 2000, label = "Enemy Avoidance Radius" },
 }
 
 
@@ -194,9 +191,16 @@ function widget:DrawScreen()
       -- Calculate knob position based on value
       local knobX = slider.x + (slider.value - slider.min) / (slider.max - slider.min) * slider.width
 
-      -- Draw the slider knob
-      gl.Color(0, 0, 1, 1) -- Blue color for knob
+      -- Draw the slider knob in green
+      gl.Color(0, 1, 0, 1) -- Green color for knob
       gl.Rect(knobX - 5, slider.y - 5, knobX + 5, slider.y + 15) -- Adjust knob size as needed
+
+      -- Draw the current value of the slider in green
+      local valueText = string.format("%.1f", slider.value)  -- Format the value to one decimal place
+      local textX = slider.x + slider.width + 10  -- Position the text to the right of the slider
+      local textY = slider.y - 5  -- Align the text vertically with the slider
+      gl.Color(0, 1, 0, 1) -- Green color for text
+      gl.Text(valueText, textX, textY, 12, "o")  -- Draw the text with size 12 and outline font ("o")
 
       -- Draw the label above the slider
       local labelYOffset = 20  -- Increase this value to move the label higher
