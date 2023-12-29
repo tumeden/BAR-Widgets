@@ -5,7 +5,7 @@ function widget:GetInfo()
     desc      = "RezBots Resurrect, Collect resources, and heal injured units.",
     author    = "Tumeden",
     date      = "2024",
-    version   = "v5.4",
+    version   = "v5.5",
     license   = "GNU GPL, v2 or later",
     layer     = 0,
     enabled   = true
@@ -124,6 +124,20 @@ local strSub = string.sub
 local findNearestEnemy = findNearestEnemy
 local getFeatureResources = getFeatureResources
 
+-- Function to count and display tasks
+function CountTaskEngagements()
+  local healingCount = 0
+  local resurrectingCount = 0
+  local collectingCount = 0
+
+  for _ in pairs(healingUnits) do healingCount = healingCount + 1 end
+  for _ in pairs(resurrectingUnits) do resurrectingCount = resurrectingCount + 1 end
+  for _, data in pairs(unitsToCollect) do
+      if data.taskStatus == "in_progress" then collectingCount = collectingCount + 1 end
+  end
+
+  return healingCount, resurrectingCount, collectingCount
+end
 
 -- Function to update and display unit count
 function UpdateAndDisplayUnitCount()
@@ -216,18 +230,25 @@ function widget:DrawScreen()
     -- Draw the window background
     gl.Color(0, 0, 0, 0.7)
     gl.Rect(windowPos.x, windowPos.y, windowPos.x + windowSize.width, windowPos.y + windowSize.height)
+        -- Update and get the unit count
+        local armRectrCount, corNecroCount = CountUnitTypes()
+        local dominantUnitType, dominantCount = DetermineDominantUnitType(armRectrCount, corNecroCount)
 
-    -- Update and get the unit count
-    local armRectrCount, corNecroCount = CountUnitTypes()
-    local dominantUnitType, dominantCount = DetermineDominantUnitType(armRectrCount, corNecroCount)
+        -- Display the unit count at the top of the UI box
+        local displayText = "Rezbots detected by Widget: " .. dominantCount
+        local textX = windowPos.x + 10 -- Adjust as needed for horizontal position
+        local textY = windowPos.y + 20 -- Adjust as needed for vertical position
+        gl.Color(1, 1, 1, 1) -- White color for text
+        gl.Text(displayText, textX, textY, 12) -- Draw the text
 
-    -- Display the unit count at the top of the UI box
-    local displayText = "Rezbots detected by Widget: " .. dominantCount
-    local textX = windowPos.x + 10 -- Adjust as needed for horizontal position
-    local textY = windowPos.y + 20 -- Adjust as needed for vertical position
-    gl.Color(1, 1, 1, 1) -- White color for text
-    gl.Text(displayText, textX, textY, 12) -- Draw the text
+        -- Get task counts
+        local healingCount, resurrectingCount, collectingCount = CountTaskEngagements()
 
+        -- Display task counts
+        local taskInfoY = textY + 30  -- Position below the unit count
+        local taskInfoText = string.format("Healing: %d, Resurrecting: %d, Collecting: %d", healingCount, resurrectingCount, collectingCount)
+        gl.Color(1, 1, 1, 1) -- White color for text
+        gl.Text(taskInfoText, textX, taskInfoY, 12) -- Draw the text
     -- Draw sliders
     for _, slider in pairs(sliders) do
       -- Draw the slider track
