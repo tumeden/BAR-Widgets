@@ -238,17 +238,18 @@ function widget:DrawScreen()
     local lineHeight = fontSize * 1.5
     local padding = 10
 
-   -- Main box configuration
-   local mainBoxWidth = vsx * 0.3
-   local mainBoxHeight = vsy * 0.5
-   local mainBoxX = (vsx - mainBoxWidth) / 2
-   local mainBoxY = (vsy + mainBoxHeight) / 2
+-- Main box configuration
+local mainBoxWidth = vsx * 0.2 -- Adjust the width to make the main box smaller
+local mainBoxHeight = vsy * 0.4 -- Adjust the height to make the main box smaller
+local mainBoxX = (vsx - mainBoxWidth) / 2
+local mainBoxY = (vsy + mainBoxHeight) / 2
 
-   -- Stats box configuration
-   local statsBoxWidth = mainBoxWidth * 0.4
-   local statsBoxHeight = lineHeight * 6
-   local statsBoxX = mainBoxX + (mainBoxWidth - statsBoxWidth) / 2  -- Center horizontally within the main box
-   local statsBoxY = mainBoxY - mainBoxHeight + padding  -- Position at the top of the main box
+-- Stats box configuration
+local statsBoxWidth = mainBoxWidth * 0.5
+local statsBoxHeight = lineHeight * 6
+local statsBoxX = mainBoxX + (mainBoxWidth - statsBoxWidth) / 2
+local statsBoxY = mainBoxY - mainBoxHeight
+
 
     -- Function to draw a bordered box
     local function drawBorderedBox(x1, y1, x2, y2, bgColor, borderColor)
