@@ -241,17 +241,17 @@ function widget:DrawScreen()
     local lineHeight = fontSize * 1.5
     local padding = 10
 
-    -- Main box configuration
-    local mainBoxWidth = vsx * 0.3
-    local mainBoxHeight = vsy * 0.5
-    local mainBoxX = (vsx - mainBoxWidth) / 2
-    local mainBoxY = (vsy + mainBoxHeight) / 2
+   -- Main box configuration
+   local mainBoxWidth = vsx * 0.3
+   local mainBoxHeight = vsy * 0.5
+   local mainBoxX = (vsx - mainBoxWidth) / 2
+   local mainBoxY = (vsy + mainBoxHeight) / 2
 
-    -- Stats box configuration
-    local statsBoxWidth = mainBoxWidth * 0.4
-    local statsBoxHeight = lineHeight * 6
-    local statsBoxX = mainBoxX + padding
-    local statsBoxY = mainBoxY - padding
+   -- Stats box configuration
+   local statsBoxWidth = mainBoxWidth * 0.4
+   local statsBoxHeight = lineHeight * 6
+   local statsBoxX = mainBoxX + (mainBoxWidth - statsBoxWidth) / 2  -- Center horizontally within the main box
+   local statsBoxY = mainBoxY - mainBoxHeight + padding  -- Position at the top of the main box
 
     -- Function to draw a bordered box
     local function drawBorderedBox(x1, y1, x2, y2, bgColor, borderColor)
@@ -514,40 +514,38 @@ end
 
 -- /////////////////////////////////////////// GameFrame Function
 function widget:GameFrame(currentFrame)
-  -- Interval for checking stuck units
-  local stuckCheckInterval = 3000  -- Number of game frames to wait between checks
+  local stuckCheckInterval = 3000
+  local actionInterval = 60
+  local unitsPerFrame = 5
 
-  -- Interval for avoidance and other actions
-  local actionInterval = 60  -- Check every 60 frames (approximately 2 seconds at 30 FPS)
-
-  -- Handle stuck units for RezBots
   if currentFrame % stuckCheckInterval == 0 then
-    for unitID, _ in pairs(unitsToCollect) do
-      local unitDefID = spGetUnitDefID(unitID)
-      if unitDefID == armRectrDefID or unitDefID == corNecroDefID then
-        local unitDef = UnitDefs[unitDefID]
-        if unitDef and (unitDef.canReclaim and unitDef.canResurrect) and Spring.ValidUnitID(unitID) and not Spring.GetUnitIsDead(unitID) then
-          handleStuckUnits(unitID, unitDef)
-        end
+      for unitID, _ in pairs(unitsToCollect) do
+          local unitDefID = spGetUnitDefID(unitID)
+          if unitDefID == armRectrDefID or unitDefID == corNecroDefID then
+              local unitDef = UnitDefs[unitDefID]
+              if unitDef and (unitDef.canReclaim and unitDef.canResurrect) and Spring.ValidUnitID(unitID) and not Spring.GetUnitIsDead(unitID) then
+                  handleStuckUnits(unitID, unitDef)
+              end
+          end
       end
-    end
   end
 
-  -- Regular actions performed at specified intervals for RezBots
   if currentFrame % actionInterval == 0 then
-    for unitID, _ in pairs(unitsToCollect) do
-      local unitDefID = spGetUnitDefID(unitID)
-      if unitDefID == armRectrDefID or unitDefID == corNecroDefID then
-        if Spring.ValidUnitID(unitID) and not Spring.GetUnitIsDead(unitID) then
-          checkAndRetreatIfNeeded(unitID, retreatRadius)
-
-          -- Process units for tasks like collecting, healing, and resurrecting
-          processUnits({[unitID] = unitsToCollect[unitID]})
-        end
+      local processedCount = 0
+      for unitID, _ in pairs(unitsToCollect) do
+          if processedCount >= unitsPerFrame then break end
+          local unitDefID = spGetUnitDefID(unitID)
+          if unitDefID == armRectrDefID or unitDefID == corNecroDefID then
+              if Spring.ValidUnitID(unitID) and not Spring.GetUnitIsDead(unitID) then
+                  checkAndRetreatIfNeeded(unitID, retreatRadius)
+                  processUnits({[unitID] = unitsToCollect[unitID]})
+                  processedCount = processedCount + 1
+              end
+          end
       end
-    end
   end
 end
+
 
 
 
@@ -793,30 +791,79 @@ function findNearestEnemy(unitID, searchRadius)
 end
 
 
--- ///////////////////////////////////////////  ressurectNearbyDeadUnits Function
-local resurrectionCacheTimeout = 30 * 60  -- Cache timeout in game frames (e.g., 30 seconds at 60 fps)
 
-function resurrectNearbyDeadUnits(unitID, healResurrectRadius)
-    local cache = resurrectionCache[unitID]
-    local currentFrame = Spring.GetGameFrame()
 
-    -- Check if cache is valid
-    if cache and (currentFrame - cache.lastUpdate < resurrectionCacheTimeout) then
-        return cache.targets  -- Return cached data
+
+local maxFeaturesToConsider = 10 -- Maximum number of features to consider for resurrection
+
+local function filterAndSortFeatures(unitID, features, maxFeatures)
+    local ux, uy, uz = spGetUnitPosition(unitID)
+    local featureData = {}
+
+    for _, featureID in ipairs(features) do
+        local fx, fy, fz = spGetFeaturePosition(featureID)
+        local distanceSq = (ux - fx)^2 + (uz - fz)^2
+        table.insert(featureData, {id = featureID, distanceSq = distanceSq})
     end
 
-    -- Update cache
+    table.sort(featureData, function(a, b) return a.distanceSq < b.distanceSq end)
+
+    local sortedFeatures = {}
+    for i = 1, math.min(maxFeatures, #featureData) do
+        table.insert(sortedFeatures, featureData[i].id)
+    end
+
+    return sortedFeatures
+end
+
+
+
+-- ///////////////////////////////////////////  ressurectNearbyDeadUnits Function
+local maxFeaturesToConsider = 10 -- Maximum number of features to consider
+
+function resurrectNearbyDeadUnits(unitID, healResurrectRadius)
     local x, y, z = spGetUnitPosition(unitID)
-    local features = Spring.GetFeaturesInCylinder(x, z, healResurrectRadius)
-    local filteredFeatures = filterFeatures(features)
-    local orderedFeatures = orderFeatureIdsByEfficientTraversalPath(unitID, filteredFeatures, {})
+    if not x or not z then return {} end
 
-    resurrectionCache[unitID] = {
-        targets = orderedFeatures,
-        lastUpdate = currentFrame
-    }
+    local allFeatures = Spring.GetFeaturesInCylinder(x, z, healResurrectRadius)
+    local nearestFeatures = {}
 
-    return orderedFeatures
+    for _, featureID in ipairs(allFeatures) do
+        local featureDefID = spGetFeatureDefID(featureID)
+        local featureDef = FeatureDefs[featureDefID]
+
+        -- Filter features based on criteria (e.g., reclaimable and resurrectable)
+        if featureDef and featureDef.reclaimable and featureDef.resurrectable then
+            local fx, fy, fz = spGetFeaturePosition(featureID)
+            local distanceSq = (x - fx)^2 + (z - fz)^2
+
+            if #nearestFeatures < maxFeaturesToConsider then
+                nearestFeatures[#nearestFeatures + 1] = {id = featureID, distanceSq = distanceSq}
+            else
+                -- Replace the farthest feature if the current one is nearer
+                local farthestIndex, farthestDistanceSq = 1, nearestFeatures[1].distanceSq
+                for i, featureData in ipairs(nearestFeatures) do
+                    if featureData.distanceSq > farthestDistanceSq then
+                        farthestIndex, farthestDistanceSq = i, featureData.distanceSq
+                    end
+                end
+                if distanceSq < farthestDistanceSq then
+                    nearestFeatures[farthestIndex] = {id = featureID, distanceSq = distanceSq}
+                end
+            end
+        end
+    end
+
+    -- Sort the nearest features by distance
+    table.sort(nearestFeatures, function(a, b) return a.distanceSq < b.distanceSq end)
+
+    -- Extract feature IDs from the table
+    local featureIDs = {}
+    for _, featureData in ipairs(nearestFeatures) do
+        table.insert(featureIDs, featureData.id)
+    end
+
+    return featureIDs
 end
 
 
@@ -1194,18 +1241,6 @@ function computePathDistance(order, positions)
       distance = distance + dist2D(x1, z1, x2, z2)
   end
   return distance
-end
-
-
-function resurrectNearbyDeadUnits(unitID, healResurrectRadius)
-  local x, y, z = spGetUnitPosition(unitID)
-  if not x or not z then return {} end
-
-  local features = Spring.GetFeaturesInCylinder(x, z, healResurrectRadius)
-  local filteredFeatures = filterFeatures(features)
-  local orderedFeatures = orderFeatureIdsByEfficientTraversalPath(unitID, filteredFeatures, optimizedPathsCache)
-
-  return orderedFeatures
 end
 
 
