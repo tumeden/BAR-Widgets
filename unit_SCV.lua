@@ -23,8 +23,6 @@ end
 
 -- /////////////////////////////////////////// Important things :))
 local widgetEnabled = true
-local optimizedPathsCache = {}
-local resurrectionCache = {}
 local resurrectingUnits = {}  -- table to keep track of units currently resurrecting
 local unitsToCollect = {}  -- table to keep track of units and their collection state
 local lastAvoidanceTime = {} -- Table to track the last avoidance time for each unit
@@ -34,14 +32,11 @@ local targetedFeatures = {}  -- Table to keep track of targeted features
 local maxUnitsPerFeature = 4  -- Maximum units allowed to target the same feature
 local healingTargets = {}  -- Track which units are being healed and by how many healers
 local maxHealersPerUnit = 4  -- Maximum number of healers per unit
-local unitTaskStatus = {}
-local CMD_RECLAIM = CMD.RECLAIM
 local healResurrectRadius = 1000 -- Set your desired heal/resurrect radius here  (default 1000,  anything larger will cause significant lag)
-local reclaimRadius = 4000 -- Set your desired reclaim radius here (any number works, 4000 is about half a large map)
-local retreatRadius = 800  -- The detection area around the SCV unit, which causes it to retreat.
-local enemyAvoidanceRadius = 675  -- Adjust this value as needed -- Define a safe distance for enemy avoidance
+local reclaimRadius = 1500 -- Set your desired reclaim radius here (any number works, 4000 is about half a large map)
+local retreatRadius = 425  -- The detection area around the SCV unit, which causes it to retreat.
+local enemyAvoidanceRadius = 925  -- Adjust this value as needed -- Define a safe distance for enemy avoidance
 local avoidanceCooldown = 30 -- Cooldown in game frames, 30 Default.
-local cluster_range = 150
 
 -- engine call optimizations
 -- =========================
@@ -196,6 +191,8 @@ local checkboxes = {
   healing = { x = windowPos.x + 30, y = windowPos.y + 50, size = 20, state = false, label = "Healing" },
   resurrecting = { x = windowPos.x + 30, y = windowPos.y + 80, size = 20, state = false, label = "Resurrect" },
   collecting = { x = windowPos.x + 30, y = windowPos.y + 110, size = 20, state = false, label = "Resource Collection" },
+  excludeBuildings = { x = windowPos.x + 30, y = windowPos.y + 140, size = 20, state = false, label = "Exclude Buildings" },
+  
 }
 
 local sliders = {
@@ -461,6 +458,12 @@ function widget:Initialize()
 
   -- You can add any additional initialization code here if needed
 
+end
+-- ///////////////////////////////////////////  isMyResbot Function 
+function isMyResbot(unitID, unitDefID)
+  local myTeamID = Spring.GetMyTeamID()
+  local unitTeamID = Spring.GetUnitTeam(unitID)
+  return unitTeamID == myTeamID and (unitDefID == armRectrDefID or unitDefID == corNecroDefID)
 end
 
 
@@ -818,52 +821,68 @@ end
 
 
 
--- ///////////////////////////////////////////  ressurectNearbyDeadUnits Function
+-- Function to check if a unit is a building
+function isBuilding(unitID)
+  local unitDefID = Spring.GetUnitDefID(unitID)
+  if not unitDefID then return false end  -- Check if unitDefID is valid
+
+  local unitDef = UnitDefs[unitDefID]
+  if not unitDef then return false end  -- Check if unitDef is valid
+
+  -- Check if the unit is a building
+  return unitDef.isBuilding or unitDef.isImmobile or false
+end
+
+
+
+-- /////////////////////////////////////////// resurrectNearbyDeadUnits Function
 local maxFeaturesToConsider = 10 -- Maximum number of features to consider
 
+-- Function to resurrect nearby dead units, excluding buildings if specified
 function resurrectNearbyDeadUnits(unitID, healResurrectRadius)
-    local x, y, z = spGetUnitPosition(unitID)
-    if not x or not z then return {} end
+  local x, y, z = spGetUnitPosition(unitID)
+  if not x or not z then return {} end
 
-    local allFeatures = Spring.GetFeaturesInCylinder(x, z, healResurrectRadius)
-    local nearestFeatures = {}
+  local allFeatures = Spring.GetFeaturesInCylinder(x, z, healResurrectRadius)
+  local nearestFeatures = {}
 
-    for _, featureID in ipairs(allFeatures) do
-        local featureDefID = spGetFeatureDefID(featureID)
-        local featureDef = FeatureDefs[featureDefID]
+  for _, featureID in ipairs(allFeatures) do
+      local featureDefID = spGetFeatureDefID(featureID)
+      local featureDef = FeatureDefs[featureDefID]
 
-        -- Filter features based on criteria (e.g., reclaimable and resurrectable)
-        if featureDef and featureDef.reclaimable and featureDef.resurrectable then
-            local fx, fy, fz = spGetFeaturePosition(featureID)
-            local distanceSq = (x - fx)^2 + (z - fz)^2
+      -- Check if the feature is a building and if it should be excluded
+      if featureDef and featureDef.reclaimable and featureDef.resurrectable and 
+         (not checkboxes.excludeBuildings.state or not isBuilding(featureID)) then
+          local fx, fy, fz = spGetFeaturePosition(featureID)
+          local distanceSq = (x - fx)^2 + (z - fz)^2
 
-            if #nearestFeatures < maxFeaturesToConsider then
-                nearestFeatures[#nearestFeatures + 1] = {id = featureID, distanceSq = distanceSq}
-            else
-                -- Replace the farthest feature if the current one is nearer
-                local farthestIndex, farthestDistanceSq = 1, nearestFeatures[1].distanceSq
-                for i, featureData in ipairs(nearestFeatures) do
-                    if featureData.distanceSq > farthestDistanceSq then
-                        farthestIndex, farthestDistanceSq = i, featureData.distanceSq
-                    end
-                end
-                if distanceSq < farthestDistanceSq then
-                    nearestFeatures[farthestIndex] = {id = featureID, distanceSq = distanceSq}
-                end
-            end
-        end
-    end
+          if #nearestFeatures < maxFeaturesToConsider then
+              nearestFeatures[#nearestFeatures + 1] = {id = featureID, distanceSq = distanceSq}
+          else
+              -- Replace the farthest feature if the current one is nearer
+              local farthestIndex, farthestDistanceSq = 1, nearestFeatures[1].distanceSq
+              for i, featureData in ipairs(nearestFeatures) do
+                  if featureData.distanceSq > farthestDistanceSq then
+                      farthestIndex, farthestDistanceSq = i, featureData.distanceSq
+                  end
+              end
+              if distanceSq < farthestDistanceSq then
+                  nearestFeatures[farthestIndex] = {id = featureID, distanceSq = distanceSq}
+              end
+          end
+      end
+  end
 
-    -- Sort the nearest features by distance
-    table.sort(nearestFeatures, function(a, b) return a.distanceSq < b.distanceSq end)
+  -- Sort the nearest features by distance
+  table.sort(nearestFeatures, function(a, b) return a.distanceSq < b.distanceSq end)
 
-    -- Extract feature IDs from the table
-    local featureIDs = {}
-    for _, featureData in ipairs(nearestFeatures) do
-        table.insert(featureIDs, featureData.id)
-    end
+  -- Extract feature IDs from the table
+  local featureIDs = {}
+  for _, featureData in ipairs(nearestFeatures) do
+      table.insert(featureIDs, featureData.id)
+  end
 
-    return featureIDs
+  return featureIDs
 end
 
 
@@ -892,11 +911,9 @@ end
 -- ///////////////////////////////////////////  UnitIdle Function
 function widget:UnitIdle(unitID)
   local unitDefID = spGetUnitDefID(unitID)
+  if not unitDefID then return end  -- Check if unitDefID is valid
   local unitDef = UnitDefs[unitDefID]
-
-  if not unitDef then
-      return -- Exit early if the unitDef is nil
-  end
+  if not unitDef then return end  -- Check if unitDef is valid
 
   -- Initialize unitData if it does not exist for this unit
   local unitData = unitsToCollect[unitID]
