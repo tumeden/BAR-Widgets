@@ -5,7 +5,7 @@ function widget:GetInfo()
     desc      = "RezBots Resurrect, Collect resources, and heal injured units. alt+c to open UI",
     author    = "Tumeden",
     date      = "2024",
-    version   = "v5.7",
+    version   = "v5.8",
     license   = "GNU GPL, v2 or later",
     layer     = 0,
     enabled   = true
@@ -395,7 +395,7 @@ function widget:MouseMove(x, y, dx, dy, button)
       newValue = math.max(math.min(newValue, activeSlider.max), activeSlider.min)  -- Clamp value
       activeSlider.value = newValue  -- Update slider value
 
-      -- Update corresponding variable
+      -- Update corresponding global variable
       if activeSlider == sliders.healResurrectRadius then
           healResurrectRadius = newValue
       elseif activeSlider == sliders.reclaimRadius then
@@ -407,6 +407,7 @@ function widget:MouseMove(x, y, dx, dy, button)
       end
   end
 end
+
 
 
 function widget:MouseRelease(x, y, button)
@@ -518,9 +519,18 @@ end
 
 -- /////////////////////////////////////////// GameFrame Function
 function widget:GameFrame(currentFrame)
+  local checkInterval = 30  -- Adjust this interval as needed
   local stuckCheckInterval = 3000
   local actionInterval = 60
   local unitsPerFrame = 5
+
+  if currentFrame % checkInterval == 0 then
+      for unitID, unitData in pairs(unitsToCollect) do
+          if isUnitActuallyIdle(unitID, unitData) then
+              handleIdleUnit(unitID, unitData)
+          end
+      end
+  end
 
   if currentFrame % stuckCheckInterval == 0 then
       for unitID, _ in pairs(unitsToCollect) do
@@ -550,6 +560,30 @@ function widget:GameFrame(currentFrame)
   end
 end
 
+function isUnitActuallyIdle(unitID, unitData)
+  -- Check if the unitID is valid
+  if not Spring.ValidUnitID(unitID) or Spring.GetUnitIsDead(unitID) then
+      return false
+  end
+
+  -- Check if the unit is not doing anything regardless of the task status
+  local currentCommands = spGetUnitCommands(unitID, 1)
+  if currentCommands then
+      return #currentCommands == 0 and unitData.taskStatus ~= "idle"
+  else
+      return false  -- Return false if currentCommands is nil
+  end
+end
+
+
+function handleIdleUnit(unitID, unitData)
+  unitData.taskStatus = "idle"
+  -- Reset other task-related data for the unit
+  -- ...
+
+  -- Re-queue the unit for task assignment
+  processUnits({[unitID] = unitData})
+end
 
 
 
@@ -857,7 +891,6 @@ local maxFeaturesToConsider = 10 -- Maximum number of features to consider
 function resurrectNearbyDeadUnits(unitID, healResurrectRadius)
   local x, y, z = spGetUnitPosition(unitID)
   if not x or not z then return {} end
-
   local allFeatures = Spring.GetFeaturesInCylinder(x, z, healResurrectRadius)
   local nearestFeatures = {}
 
@@ -899,6 +932,7 @@ function resurrectNearbyDeadUnits(unitID, healResurrectRadius)
 
   return featureIDs
 end
+
 
 
 
