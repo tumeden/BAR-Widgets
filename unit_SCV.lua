@@ -5,7 +5,7 @@ function widget:GetInfo()
     desc      = "RezBots Resurrect, Collect resources, and heal injured units. alt+c to open UI",
     author    = "Tumeden",
     date      = "2024",
-    version   = "v5.6",
+    version   = "v5.7",
     license   = "GNU GPL, v2 or later",
     layer     = 0,
     enabled   = true
@@ -593,6 +593,30 @@ end
 
 
 
+-- /////////////////////////////////////////// isTargetReachable Function
+function isTargetReachable(unitID, featureID)
+  local fx, fy, fz = spGetFeaturePosition(featureID)
+  local mx, my, mz = spGetUnitPosition(unitID)
+  local unitDefID = spGetUnitDefID(unitID)
+  local unitDef = UnitDefs[unitDefID]
+  local moveDefID = unitDef.moveDef.id  -- This gets the moveDefID
+
+  local path = Spring.RequestPath(moveDefID, mx, my, mz, fx, fy, fz)  -- Corrected argument
+
+  if path then
+      local waypoints, pathDetails = path:GetPathWayPoints()
+      return waypoints and #waypoints > 0
+  else
+      return false
+  end
+end
+
+
+
+
+
+
+
 -- /////////////////////////////////////////// processUnits Function
 function processUnits(units)
   for unitID, unitData in pairs(units) do
@@ -697,24 +721,27 @@ function findReclaimableFeature(unitID, x, z, searchRadius, resourceNeed)
   local bestScore = math.huge
 
   for _, featureID in ipairs(featuresInRadius) do
-      local featureDefID = spGetFeatureDefID(featureID)
-      local featureDef = FeatureDefs[featureDefID]
-      local featureMetal, featureEnergy = getFeatureResources(featureID)
+      if isTargetReachable(unitID, featureID) then
+          local featureDefID = spGetFeatureDefID(featureID)
+          local featureDef = FeatureDefs[featureDefID]
+          local featureMetal, featureEnergy = getFeatureResources(featureID)
 
-      if featureDef and featureDef.reclaimable then
-          local featureX, _, featureZ = Spring.GetFeaturePosition(featureID)
-          local distanceToFeature = ((featureX - x)^2 + (featureZ - z)^2)^0.5
-          local score = calculateResourceScore(featureMetal, featureEnergy, distanceToFeature, resourceNeed)
+          if featureDef and featureDef.reclaimable then
+              local featureX, _, featureZ = Spring.GetFeaturePosition(featureID)
+              local distanceToFeature = ((featureX - x)^2 + (featureZ - z)^2)^0.5
+              local score = calculateResourceScore(featureMetal, featureEnergy, distanceToFeature, resourceNeed)
 
-          if score < bestScore and (not targetedFeatures[featureID] or targetedFeatures[featureID] < maxUnitsPerFeature) then
-              bestScore = score
-              bestFeature = featureID
+              if score < bestScore and (not targetedFeatures[featureID] or targetedFeatures[featureID] < maxUnitsPerFeature) then
+                  bestScore = score
+                  bestFeature = featureID
+              end
           end
       end
   end
 
   return bestFeature
 end
+
 
 
 -- /////////////////////////////////////////// calculateResourceScore Function
