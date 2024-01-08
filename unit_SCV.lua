@@ -5,7 +5,7 @@ function widget:GetInfo()
     desc      = "RezBots Resurrect, Collect resources, and heal injured units. alt+c to open UI",
     author    = "Tumeden",
     date      = "2024",
-    version   = "v5.9",
+    version   = "v6.0",
     license   = "GNU GPL, v2 or later",
     layer     = 0,
     enabled   = true
@@ -672,6 +672,25 @@ end
 
 
 
+-- ///////////////////////////////////////////  assessResourceNeeds Function
+function assessResourceNeeds()
+  local myTeamID = Spring.GetMyTeamID()
+  local currentMetal, storageMetal = Spring.GetTeamResources(myTeamID, "metal")
+  local currentEnergy, storageEnergy = Spring.GetTeamResources(myTeamID, "energy")
+
+  local metalFull = currentMetal >= storageMetal * 0.80  -- Considered full at 95%
+  local energyFull = currentEnergy >= storageEnergy * 0.80  -- Considered full at 95%
+
+  if metalFull and energyFull then
+    return "full"
+  elseif metalFull then
+    return "energy"
+  elseif energyFull then
+    return "metal"
+  else
+    return "proximity" -- Neither resource is full, focus on proximity
+  end
+end
 
 
 -- /////////////////////////////////////////// processUnits Function
@@ -700,6 +719,28 @@ function processUnits(units)
           return
       end
 
+
+      -- Healing Logic
+      if checkboxes.healing.state then
+        local nearestDamagedUnit, distance = findNearestDamagedFriendly(unitID, healResurrectRadius)
+        if nearestDamagedUnit and distance < healResurrectRadius then
+            healingTargets[nearestDamagedUnit] = healingTargets[nearestDamagedUnit] or 0
+            if healingTargets[nearestDamagedUnit] < maxHealersPerUnit and not healingUnits[unitID] then
+                Spring.GiveOrderToUnit(unitID, CMD.REPAIR, {nearestDamagedUnit}, {})
+                healingUnits[unitID] = nearestDamagedUnit
+                healingTargets[nearestDamagedUnit] = healingTargets[nearestDamagedUnit] + 1
+                unitData.taskType = "healing"
+                unitData.taskStatus = "in_progress"
+            end
+        end
+    end
+      -- Assess resource needs
+      local resourceNeed = assessResourceNeeds()
+      if resourceNeed == "full" then
+          -- Skip resource collection because resources are full
+          return
+      end
+
       -- Prioritize tasks based on current state and settings
       local canResurrect = checkboxes.resurrecting.state and not resurrectingUnits[unitID]
       local canCollect = checkboxes.collecting.state and unitData.taskStatus ~= "in_progress"
@@ -721,38 +762,19 @@ function processUnits(units)
       end
 
       if canCollect then
-          local resourceNeed = assessResourceNeeds()
-          local featureCollected = false
-
-          if resourceNeed ~= "none" then
-              local x, y, z = spGetUnitPosition(unitID)
-              local featureID = findReclaimableFeature(unitID, x, z, reclaimRadius, resourceNeed)
-              if featureID and Spring.ValidFeatureID(featureID) then
-                  spGiveOrderToUnit(unitID, CMD_RECLAIM, {featureID + Game.maxUnits}, {})
-                  unitData.featureCount = 1
-                  unitData.lastReclaimedFrame = Spring.GetGameFrame()
-                  targetedFeatures[featureID] = (targetedFeatures[featureID] or 0) + 1
-                  unitData.taskType = "reclaiming"
-                  unitData.taskStatus = "in_progress"
-                  featureCollected = true
-              end
+          local x, y, z = spGetUnitPosition(unitID)
+          local featureID = findReclaimableFeature(unitID, x, z, reclaimRadius, resourceNeed)
+          if featureID and Spring.ValidFeatureID(featureID) then
+              spGiveOrderToUnit(unitID, CMD_RECLAIM, {featureID + Game.maxUnits}, {})
+              unitData.featureCount = 1
+              unitData.lastReclaimedFrame = Spring.GetGameFrame()
+              targetedFeatures[featureID] = (targetedFeatures[featureID] or 0) + 1
+              unitData.taskType = "reclaiming"
+              unitData.taskStatus = "in_progress"
           end
       end
 
-      -- Healing Logic
-      if checkboxes.healing.state and not featureCollected then
-          local nearestDamagedUnit, distance = findNearestDamagedFriendly(unitID, healResurrectRadius)
-          if nearestDamagedUnit and distance < healResurrectRadius then
-              healingTargets[nearestDamagedUnit] = healingTargets[nearestDamagedUnit] or 0
-              if healingTargets[nearestDamagedUnit] < maxHealersPerUnit and not healingUnits[unitID] then
-                  Spring.GiveOrderToUnit(unitID, CMD.REPAIR, {nearestDamagedUnit}, {})
-                  healingUnits[unitID] = nearestDamagedUnit
-                  healingTargets[nearestDamagedUnit] = healingTargets[nearestDamagedUnit] + 1
-                  unitData.taskType = "healing"
-                  unitData.taskStatus = "in_progress"
-              end
-          end
-      end
+
     end
   end
 end
@@ -1029,27 +1051,6 @@ function handleStuckUnits(unitID, unitDef)
           }
           processUnits({[unitID] = unitsToCollect[unitID]})
       end
-  end
-end
-
-
--- ///////////////////////////////////////////  assessResourceNeeds Function
-function assessResourceNeeds()
-  local myTeamID = Spring.GetMyTeamID()
-  local currentMetal, storageMetal = Spring.GetTeamResources(myTeamID, "metal")
-  local currentEnergy, storageEnergy = Spring.GetTeamResources(myTeamID, "energy")
-
-  local metalFull = currentMetal >= storageMetal * 0.75  -- 75% full
-  local energyFull = currentEnergy >= storageEnergy * 0.75  -- 75% full
-
-  if metalFull and energyFull then
-    return "none"
-  elseif metalFull then
-    return "energy"
-  elseif energyFull then
-    return "metal"
-  else
-    return "proximity" -- Neither resource is full, focus on proximity
   end
 end
 
