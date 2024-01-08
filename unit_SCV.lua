@@ -734,12 +734,7 @@ function processUnits(units)
             end
         end
     end
-      -- Assess resource needs
-      local resourceNeed = assessResourceNeeds()
-      if resourceNeed == "full" then
-          -- Skip resource collection because resources are full
-          return
-      end
+
 
       -- Prioritize tasks based on current state and settings
       local canResurrect = checkboxes.resurrecting.state and unitData.taskStatus ~= "in_progress"
@@ -760,7 +755,12 @@ function processUnits(units)
               return
           end
       end
-
+      -- Assess resource needs
+      local resourceNeed = assessResourceNeeds()
+      if resourceNeed == "full" then
+          -- Skip resource collection because resources are full
+          return
+      end
       if canCollect then
           local x, y, z = spGetUnitPosition(unitID)
           local featureID = findReclaimableFeature(unitID, x, z, reclaimRadius, resourceNeed)
@@ -771,10 +771,9 @@ function processUnits(units)
               targetedFeatures[featureID] = (targetedFeatures[featureID] or 0) + 1
               unitData.taskType = "reclaiming"
               unitData.taskStatus = "in_progress"
+              return
           end
       end
-
-
     end
   end
 end
