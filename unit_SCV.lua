@@ -721,7 +721,7 @@ function processUnits(units)
 
 
       -- Healing Logic
-      if checkboxes.healing.state then
+      if checkboxes.healing.state and unitData.taskStatus ~= "in_progress" then
         local nearestDamagedUnit, distance = findNearestDamagedFriendly(unitID, healResurrectRadius)
         if nearestDamagedUnit and distance < healResurrectRadius then
             healingTargets[nearestDamagedUnit] = healingTargets[nearestDamagedUnit] or 0
@@ -742,8 +742,8 @@ function processUnits(units)
       end
 
       -- Prioritize tasks based on current state and settings
-      local canResurrect = checkboxes.resurrecting.state and not resurrectingUnits[unitID]
-      local canCollect = checkboxes.collecting.state and unitData.taskStatus ~= "in_progress"
+      local canResurrect = checkboxes.resurrecting.state and unitData.taskStatus ~= "in_progress"
+      local canCollect = checkboxes.collecting.state and unitData.taskStatus ~= "in_progress"      
 
       if canResurrect then
           local resurrectableFeatures = resurrectNearbyDeadUnits(unitID, healResurrectRadius)
