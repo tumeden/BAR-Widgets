@@ -662,7 +662,7 @@ function processUnits(units)
         if checkboxes.resurrecting.state then
             local resurrectableFeatures = resurrectNearbyDeadUnits(unitID, healResurrectRadius)
             if #resurrectableFeatures > 0 then
-                local orders = generateOrders(resurrectableFeatures, false, nil)
+              local orders = generateOrders(resurrectableFeatures, false, nil, unitID)
                 for _, order in ipairs(orders) do
                     if Spring.ValidFeatureID(order[2] - Game.maxUnits) then
                         spGiveOrderToUnit(unitID, order[1], order[2], order[3])
@@ -1094,27 +1094,25 @@ local function filterFeatures(features)
   return filteredFeatures
 end
 
-function generateOrders(features, addToQueue, returnPos)
+function generateOrders(features, addToQueue, returnPos, unitID)
   local orders = {}
 
   for i, featureID in ipairs(features) do
-      local wreckageDefID = Spring.GetFeatureDefID(featureID)
-      local feature = FeatureDefs[wreckageDefID]
+      if isTargetReachable(unitID, featureID) then
+          local wreckageDefID = Spring.GetFeatureDefID(featureID)
+          local feature = FeatureDefs[wreckageDefID]
 
-      -- feature.resurrectable is nonzero for rocks etc. Checking for "corpses" is a workaround.
-      if feature.customParams["category"] == "corpses" then
-          table.insert(orders, {CMD.RESURRECT, featureID + Game.maxUnits, {shift = false}})
-      else -- We already filtered out non-reclaimable stuff.
-          table.insert(orders, {CMD.RECLAIM, featureID + Game.maxUnits, {shift = false}})
+          -- Check if feature should be resurrected and is reachable
+          if feature.customParams["category"] == "corpses" and checkboxes.resurrecting.state then
+              table.insert(orders, {CMD.RESURRECT, featureID + Game.maxUnits, {"shift"}})
+              break  -- Ensures only one order is processed at a time
+          end
       end
-
-      -- Break after the first order to ensure only one task is handled at a time
-      break
   end
-
 
   return orders
 end
+
 
 
 
