@@ -627,16 +627,6 @@ function processUnits(units)
           return -- Skip invalid or dead units
       end
 
-      -- Skip if the unit is currently engaged in a task
-      if unitData.taskStatus == "in_progress" then
-          return
-      end
-
-      -- Skip if the unit is currently engaged in a task
-      if unitData.taskStatus == "in_progress" then
-          return
-      end
-
       -- Check if the unit is fully built
       local _, _, _, _, buildProgress = Spring.GetUnitHealth(unitID)
       if buildProgress < 1 then
@@ -644,73 +634,70 @@ function processUnits(units)
           return
       end
 
-      -- Check if the unit is already tasked with resurrecting
-      if resurrectingUnits[unitID] then
-          return -- Skip this unit as it's already resurrecting something
+      -- Avoid enemies if necessary
+      local nearestEnemy, distance = findNearestEnemy(unitID, enemyAvoidanceRadius)
+      if nearestEnemy and distance < enemyAvoidanceRadius then
+          avoidEnemy(unitID, nearestEnemy)
+          unitData.taskType = "avoidingEnemy"
+          unitData.taskStatus = "in_progress"
+          return
       end
 
-        -- Avoid enemies if necessary
-        local nearestEnemy, distance = findNearestEnemy(unitID, enemyAvoidanceRadius)
-        if nearestEnemy and distance < enemyAvoidanceRadius then
-            avoidEnemy(unitID, nearestEnemy)
-            unitData.taskType = "avoidingEnemy"
-            unitData.taskStatus = "in_progress"
-            return
-        end
+      -- Prioritize tasks based on current state and settings
+      local canResurrect = checkboxes.resurrecting.state and not resurrectingUnits[unitID]
+      local canCollect = checkboxes.collecting.state and unitData.taskStatus ~= "in_progress"
 
-        -- Resurrecting Logic
-        if checkboxes.resurrecting.state then
-            local resurrectableFeatures = resurrectNearbyDeadUnits(unitID, healResurrectRadius)
-            if #resurrectableFeatures > 0 then
+      if canResurrect then
+          local resurrectableFeatures = resurrectNearbyDeadUnits(unitID, healResurrectRadius)
+          if #resurrectableFeatures > 0 then
               local orders = generateOrders(resurrectableFeatures, false, nil, unitID)
-                for _, order in ipairs(orders) do
-                    if Spring.ValidFeatureID(order[2] - Game.maxUnits) then
-                        spGiveOrderToUnit(unitID, order[1], order[2], order[3])
-                    end
-                end
-                unitData.taskType = "resurrecting"
-                unitData.taskStatus = "in_progress"
-                resurrectingUnits[unitID] = true
-                return
-            end
-        end
+              for _, order in ipairs(orders) do
+                  if Spring.ValidFeatureID(order[2] - Game.maxUnits) then
+                      spGiveOrderToUnit(unitID, order[1], order[2], order[3])
+                  end
+              end
+              unitData.taskType = "resurrecting"
+              unitData.taskStatus = "in_progress"
+              resurrectingUnits[unitID] = true
+              return
+          end
+      end
 
-        -- Collecting Logic
-        if checkboxes.collecting.state then
-            local resourceNeed = assessResourceNeeds()
-            local featureCollected = false
+      if canCollect then
+          local resourceNeed = assessResourceNeeds()
+          local featureCollected = false
 
-            if resourceNeed ~= "none" then
-                local x, y, z = spGetUnitPosition(unitID)
-                local featureID = findReclaimableFeature(unitID, x, z, reclaimRadius, resourceNeed)
-                if featureID and Spring.ValidFeatureID(featureID) then
-                    spGiveOrderToUnit(unitID, CMD_RECLAIM, {featureID + Game.maxUnits}, {})
-                    unitData.featureCount = 1
-                    unitData.lastReclaimedFrame = Spring.GetGameFrame()
-                    targetedFeatures[featureID] = (targetedFeatures[featureID] or 0) + 1
-                    unitData.taskType = "reclaiming"
-                    unitData.taskStatus = "in_progress"
-                    featureCollected = true
-                end
-            end
-        end
+          if resourceNeed ~= "none" then
+              local x, y, z = spGetUnitPosition(unitID)
+              local featureID = findReclaimableFeature(unitID, x, z, reclaimRadius, resourceNeed)
+              if featureID and Spring.ValidFeatureID(featureID) then
+                  spGiveOrderToUnit(unitID, CMD_RECLAIM, {featureID + Game.maxUnits}, {})
+                  unitData.featureCount = 1
+                  unitData.lastReclaimedFrame = Spring.GetGameFrame()
+                  targetedFeatures[featureID] = (targetedFeatures[featureID] or 0) + 1
+                  unitData.taskType = "reclaiming"
+                  unitData.taskStatus = "in_progress"
+                  featureCollected = true
+              end
+          end
+      end
 
-        -- Healing Logic
-        if checkboxes.healing.state and not featureCollected then
-            local nearestDamagedUnit, distance = findNearestDamagedFriendly(unitID, healResurrectRadius)
-            if nearestDamagedUnit and distance < healResurrectRadius then
-                healingTargets[nearestDamagedUnit] = healingTargets[nearestDamagedUnit] or 0
-                if healingTargets[nearestDamagedUnit] < maxHealersPerUnit and not healingUnits[unitID] then
-                    Spring.GiveOrderToUnit(unitID, CMD.REPAIR, {nearestDamagedUnit}, {})
-                    healingUnits[unitID] = nearestDamagedUnit
-                    healingTargets[nearestDamagedUnit] = healingTargets[nearestDamagedUnit] + 1
-                    unitData.taskType = "healing"
-                    unitData.taskStatus = "in_progress"
-                end
-            end
-        end
+      -- Healing Logic
+      if checkboxes.healing.state and not featureCollected then
+          local nearestDamagedUnit, distance = findNearestDamagedFriendly(unitID, healResurrectRadius)
+          if nearestDamagedUnit and distance < healResurrectRadius then
+              healingTargets[nearestDamagedUnit] = healingTargets[nearestDamagedUnit] or 0
+              if healingTargets[nearestDamagedUnit] < maxHealersPerUnit and not healingUnits[unitID] then
+                  Spring.GiveOrderToUnit(unitID, CMD.REPAIR, {nearestDamagedUnit}, {})
+                  healingUnits[unitID] = nearestDamagedUnit
+                  healingTargets[nearestDamagedUnit] = healingTargets[nearestDamagedUnit] + 1
+                  unitData.taskType = "healing"
+                  unitData.taskStatus = "in_progress"
+              end
+          end
+      end
     end
-end
+  end
 end
 
 
