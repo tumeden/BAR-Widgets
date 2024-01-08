@@ -264,10 +264,16 @@ local mainBoxX = (vsx - mainBoxWidth) / 2
 local mainBoxY = (vsy + mainBoxHeight) / 2
 
 -- Stats box configuration
-local statsBoxWidth = mainBoxWidth * 0.5
+local statsBoxWidth = mainBoxWidth * 0.9
 local statsBoxHeight = lineHeight * 6
 local statsBoxX = mainBoxX + (mainBoxWidth - statsBoxWidth) / 2
-local statsBoxY = mainBoxY - mainBoxHeight
+
+-- Variable to adjust the stats box vertical position within the main UI box
+-- Positive values move it down, negative values move it up.
+local statsBoxVerticalOffset = 170  -- Adjust this value to move the stats box up or down
+
+-- Position statsBoxY using the new offset variable
+local statsBoxY = mainBoxY + mainBoxHeight - statsBoxHeight - padding - statsBoxVerticalOffset
 
 
     -- Function to draw a bordered box
@@ -728,7 +734,6 @@ function processUnits(units)
           avoidEnemy(unitID, nearestEnemy)
           unitData.taskType = "avoidingEnemy"
           unitData.taskStatus = "in_progress"
-          return
       end
 
 
@@ -748,11 +753,9 @@ function processUnits(units)
     end
 
 
-      -- Prioritize tasks based on current state and settings
-      local canResurrect = checkboxes.resurrecting.state and unitData.taskStatus ~= "in_progress"
-      local canCollect = checkboxes.collecting.state and unitData.taskStatus ~= "in_progress"      
+  
 
-      if canResurrect then
+      if checkboxes.resurrecting.state and unitData.taskStatus ~= "in_progress" then
           local resurrectableFeatures = resurrectNearbyDeadUnits(unitID, healResurrectRadius)
           if #resurrectableFeatures > 0 then
               local orders = generateOrders(resurrectableFeatures, false, nil, unitID)
@@ -764,7 +767,6 @@ function processUnits(units)
               unitData.taskType = "resurrecting"
               unitData.taskStatus = "in_progress"
               resurrectingUnits[unitID] = true
-              return
           end
       end
       -- Assess resource needs
@@ -773,7 +775,7 @@ function processUnits(units)
           -- Skip resource collection because resources are full
           return
       end
-      if canCollect then
+      if checkboxes.collecting.state and unitData.taskStatus ~= "in_progress" then
           local x, y, z = spGetUnitPosition(unitID)
           local featureID = findReclaimableFeature(unitID, x, z, reclaimRadius, resourceNeed)
           if featureID and Spring.ValidFeatureID(featureID) then
@@ -783,7 +785,6 @@ function processUnits(units)
               targetedFeatures[featureID] = (targetedFeatures[featureID] or 0) + 1
               unitData.taskType = "reclaiming"
               unitData.taskStatus = "in_progress"
-              return
           end
       end
     end
