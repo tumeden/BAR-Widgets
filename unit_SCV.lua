@@ -678,8 +678,8 @@ function assessResourceNeeds()
   local currentMetal, storageMetal = Spring.GetTeamResources(myTeamID, "metal")
   local currentEnergy, storageEnergy = Spring.GetTeamResources(myTeamID, "energy")
 
-  local metalFull = currentMetal >= storageMetal * 0.80  -- Considered full at 95%
-  local energyFull = currentEnergy >= storageEnergy * 0.80  -- Considered full at 95%
+  local metalFull = currentMetal >= storageMetal * 0.90  -- Considered full at 90%
+  local energyFull = currentEnergy >= storageEnergy * 0.90  -- Considered full at 90%
 
   if metalFull and energyFull then
     return "full"
