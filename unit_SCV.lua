@@ -5,7 +5,7 @@ function widget:GetInfo()
     desc      = "RezBots Resurrect, Collect resources, and heal injured units. alt+c to open UI",
     author    = "Tumeden",
     date      = "2024",
-    version   = "v5.8",
+    version   = "v5.9",
     license   = "GNU GPL, v2 or later",
     layer     = 0,
     enabled   = true
@@ -124,18 +124,25 @@ local getFeatureResources = getFeatureResources
 
 -- Function to count and display tasks
 function CountTaskEngagements()
-  local healingCount = 0
-  local resurrectingCount = 0
-  local collectingCount = 0
+  local healingCount, resurrectingCount, collectingCount = 0, 0, 0
 
-  for _ in pairs(healingUnits) do healingCount = healingCount + 1 end
-  for _ in pairs(resurrectingUnits) do resurrectingCount = resurrectingCount + 1 end
-  for _, data in pairs(unitsToCollect) do
-      if data.taskStatus == "in_progress" then collectingCount = collectingCount + 1 end
+  for _, unitID in ipairs(healingUnits) do
+    healingCount = healingCount + 1
+  end
+  for unitID, _ in pairs(resurrectingUnits) do
+    if not healingUnits[unitID] then  -- Ensure a unit is not counted in both
+      resurrectingCount = resurrectingCount + 1
+    end
+  end
+  for unitID, data in pairs(unitsToCollect) do
+    if data.taskStatus == "in_progress" and not resurrectingUnits[unitID] then  -- Again, check for double counting
+      collectingCount = collectingCount + 1
+    end
   end
 
   return healingCount, resurrectingCount, collectingCount
 end
+
 
 -- Function to update and display unit count
 function UpdateAndDisplayUnitCount()
@@ -620,11 +627,16 @@ function avoidEnemy(unitID, enemyID)
     -- Issue a move order to the safe destination
     spGiveOrderToUnit(unitID, CMD.MOVE, {safeX, safeY, safeZ}, {})
 
+    -- Update the task status and clear from the resurrectingUnits
+    if resurrectingUnits[unitID] then
+      resurrectingUnits[unitID] = nil -- Clear the unit from resurrecting status
+      unitsToCollect[unitID].taskStatus = "idle" -- Set status to idle or another status like "retreating"
+    end
+
     -- Update the last avoidance time for this unit
     lastAvoidanceTime[unitID] = currentTime
   end
 end
-
 
 
 -- /////////////////////////////////////////// isTargetReachable Function
@@ -845,31 +857,6 @@ end
 
 
 
-
-local maxFeaturesToConsider = 10 -- Maximum number of features to consider for resurrection
-
-local function filterAndSortFeatures(unitID, features, maxFeatures)
-    local ux, uy, uz = spGetUnitPosition(unitID)
-    local featureData = {}
-
-    for _, featureID in ipairs(features) do
-        local fx, fy, fz = spGetFeaturePosition(featureID)
-        local distanceSq = (ux - fx)^2 + (uz - fz)^2
-        table.insert(featureData, {id = featureID, distanceSq = distanceSq})
-    end
-
-    table.sort(featureData, function(a, b) return a.distanceSq < b.distanceSq end)
-
-    local sortedFeatures = {}
-    for i = 1, math.min(maxFeatures, #featureData) do
-        table.insert(sortedFeatures, featureData[i].id)
-    end
-
-    return sortedFeatures
-end
-
-
-
 -- Function to check if a unit is a building
 function isBuilding(unitID)
   local unitDefID = Spring.GetUnitDefID(unitID)
@@ -953,10 +940,6 @@ end
 
 
 
-
-
-
-
 -- ///////////////////////////////////////////  UnitIdle Function
 function widget:UnitIdle(unitID)
   local unitDefID = spGetUnitDefID(unitID)
@@ -974,9 +957,13 @@ function widget:UnitIdle(unitID)
           featureID = nil  -- Make sure to initialize all fields that will be used
       }
       unitsToCollect[unitID] = unitData
-      -- Spring.Echo("UnitIdle: Initialized unitsToCollect entry for unitID:", unitID)
   else
       unitData.taskStatus = "idle"
+  end
+
+  -- Clear the unit from resurrecting status if it was in the process
+  if resurrectingUnits[unitID] then
+      resurrectingUnits[unitID] = nil
   end
 
   -- Re-queue the unit for tasks based on the checkbox states
@@ -1005,13 +992,8 @@ function widget:UnitIdle(unitID)
       healingUnits[unitID] = nil
   end
 
-  if resurrectingUnits[unitID] then
-      resurrectingUnits[unitID] = nil
-  end
-
   -- Additional cleanup or re-queue logic can go here, if needed
 end
-
 
 
 
@@ -1090,30 +1072,6 @@ end
 
 
 
-
-
-
-
-
--- /////////// TESTING STUFF 
-
-
-
-local function filterFeatures(features)
-  local filteredFeatures = {}
-
-  -- Filter out trees, tombstones, etc.
-  for _, featureID in ipairs(features) do
-      local wreckageDefID = Spring.GetFeatureDefID(featureID)
-      local feature = FeatureDefs[wreckageDefID]
-
-      if feature.reclaimable and (feature.metal > 0) then
-          table.insert(filteredFeatures, featureID)
-      end
-  end
-
-  return filteredFeatures
-end
 
 function generateOrders(features, addToQueue, returnPos, unitID)
   local orders = {}
