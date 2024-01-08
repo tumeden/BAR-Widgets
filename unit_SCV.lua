@@ -122,6 +122,14 @@ local strSub = string.sub
 local findNearestEnemy = findNearestEnemy
 local getFeatureResources = getFeatureResources
 
+
+
+-- /////////////////////////////////////////// -- /////////////////////////////////////////// --
+-- /////////////////////////////////////////// -- /////////////////////////////////////////// --
+-- ////////////////////////////////////////- UI CODE -////////////////////////////////////// --
+-- /////////////////////////////////////////// -- /////////////////////////////////////////// --
+-- /////////////////////////////////////////// -- /////////////////////////////////////////// --
+
 -- Function to count and display tasks
 function CountTaskEngagements()
   local healingCount, resurrectingCount, collectingCount = 0, 0, 0
@@ -154,6 +162,7 @@ function UpdateAndDisplayUnitCount()
   gl.Color(1, 1, 1, 1) -- White color
   gl.Text(displayText, 50, 50, 12, "d") -- Adjust position and size as needed
 end
+
 function CountUnitTypes()
   local armRectrCount = 0
   local corNecroCount = 0
@@ -170,6 +179,7 @@ function CountUnitTypes()
 
   return armRectrCount, corNecroCount
 end
+
 -- Function to determine the dominant unit type
 function DetermineDominantUnitType(armRectrCount, corNecroCount)
   if armRectrCount > corNecroCount then
@@ -178,13 +188,6 @@ function DetermineDominantUnitType(armRectrCount, corNecroCount)
       return "Rezbot", corNecroCount
   end
 end
-
-
--- /////////////////////////////////////////// -- /////////////////////////////////////////// --
--- /////////////////////////////////////////// -- /////////////////////////////////////////// --
--- ////////////////////////////////////////- UI CODE -////////////////////////////////////// --
--- /////////////////////////////////////////// -- /////////////////////////////////////////// --
--- /////////////////////////////////////////// -- /////////////////////////////////////////// --
 
 
 -- /////////////////////////////////////////// UI Variables
@@ -222,13 +225,22 @@ end
 
 
 -- /////////////////////////////////////////// KeyPress Function Modification
+local ESCAPE_KEY = 27 -- Escape key is usually 27 in ASCII
+
 function widget:KeyPress(key, mods, isRepeat)
-  if key == 0x0063 and mods.alt then -- 0x0063 is the key code for "c"
-      showUI = not showUI
-      return true
-  end
-  return false
+    if key == 0x0063 and mods.alt then -- Alt+C to toggle UI
+        showUI = not showUI
+        return true
+    end
+
+    if key == ESCAPE_KEY then -- Directly check the ASCII value for the Escape key
+        showUI = false
+        return true
+    end
+
+    return false
 end
+
 
 
 
