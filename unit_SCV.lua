@@ -509,21 +509,6 @@ end
 
 
 
--- ///////////////////////////////////////////  FeatureDestroyed Function
-function widget:FeatureDestroyed(featureID, allyTeam)
-  for unitID, data in pairs(unitsToCollect) do
-    if data.featureID == featureID then
-      data.featureID = nil
-      data.lastReclaimedFrame = Spring.GetGameFrame()
-      data.taskStatus = "completed"  -- Marking the task as completed
-      processUnits(unitsToCollect)
-      break
-    end
-  end
-  targetedFeatures[featureID] = nil  -- Clear the target as the feature is destroyed
-end
-
-
 -- /////////////////////////////////////////// GameFrame Function
 function widget:GameFrame(currentFrame)
   local checkInterval = 30  -- Adjust this interval as needed
@@ -657,7 +642,33 @@ function isTargetReachable(unitID, featureID)
   end
 end
 
+-- /////////////////////////////////////////// findNearestEnemy Function
+-- Function to find the nearest enemy and its type
+function findNearestEnemy(unitID, searchRadius)
+  local x, y, z = spGetUnitPosition(unitID)
+  if not x or not z then return nil end  -- Validate unit position
+  local unitsInRadius = Spring.GetUnitsInCylinder(x, z, searchRadius, Spring.ENEMY_UNITS)
+  
 
+  local minDistSq = searchRadius * searchRadius
+  local nearestEnemy, isAirUnit = nil, false
+
+  for _, enemyID in ipairs(unitsInRadius) do
+    local enemyDefID = spGetUnitDefID(enemyID)
+    local enemyDef = UnitDefs[enemyDefID]
+    if enemyDef then
+      local ex, ey, ez = spGetUnitPosition(enemyID)
+      local distSq = (x - ex)^2 + (z - ez)^2
+      if distSq < minDistSq then
+        minDistSq = distSq
+        nearestEnemy = enemyID
+        isAirUnit = enemyDef.isAirUnit
+      end
+    end
+  end
+
+  return nearestEnemy, math.sqrt(minDistSq), isAirUnit
+end
 
 
 
@@ -746,6 +757,12 @@ function processUnits(units)
   end
 end
 
+-- /////////////////////////////////////////// getFeatureResources Function
+function getFeatureResources(featureID)
+  local featureDefID = spGetFeatureDefID(featureID)
+  local featureDef = FeatureDefs[featureDefID]
+  return featureDef.metal, featureDef.energy
+end
 
 -- /////////////////////////////////////////// findReclaimableFeature Function
 function findReclaimableFeature(unitID, x, z, searchRadius, resourceNeed)
@@ -824,34 +841,6 @@ function findNearestDamagedFriendly(unitID, searchRadius)
   end
 
   return nearestDamagedUnit, math.sqrt(minDistSq)
-end
-
-
--- Function to find the nearest enemy and its type
-function findNearestEnemy(unitID, searchRadius)
-  local x, y, z = spGetUnitPosition(unitID)
-  if not x or not z then return nil end  -- Validate unit position
-  local unitsInRadius = Spring.GetUnitsInCylinder(x, z, searchRadius, Spring.ENEMY_UNITS)
-  
-
-  local minDistSq = searchRadius * searchRadius
-  local nearestEnemy, isAirUnit = nil, false
-
-  for _, enemyID in ipairs(unitsInRadius) do
-    local enemyDefID = spGetUnitDefID(enemyID)
-    local enemyDef = UnitDefs[enemyDefID]
-    if enemyDef then
-      local ex, ey, ez = spGetUnitPosition(enemyID)
-      local distSq = (x - ex)^2 + (z - ez)^2
-      if distSq < minDistSq then
-        minDistSq = distSq
-        nearestEnemy = enemyID
-        isAirUnit = enemyDef.isAirUnit
-      end
-    end
-  end
-
-  return nearestEnemy, math.sqrt(minDistSq), isAirUnit
 end
 
 
@@ -1064,11 +1053,7 @@ function assessResourceNeeds()
   end
 end
 
-function getFeatureResources(featureID)
-  local featureDefID = spGetFeatureDefID(featureID)
-  local featureDef = FeatureDefs[featureDefID]
-  return featureDef.metal, featureDef.energy
-end
+
 
 
 
