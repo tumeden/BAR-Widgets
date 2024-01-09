@@ -695,45 +695,57 @@ end
 
 -- /////////////////////////////////////////// isTargetReachable Function
 function isTargetReachable(unitID, featureID)
-  local fx, fy, fz = spGetFeaturePosition(featureID)
-  local mx, my, mz = spGetUnitPosition(unitID)
-  local unitDefID = spGetUnitDefID(unitID)
+  local unitDefID = Spring.GetUnitDefID(unitID)
+
+  if not isMyResbot(unitID, unitDefID) then
+    return false -- Unit is not a resbot, target is not reachable
+  end
+
+  local fx, fy, fz = Spring.GetFeaturePosition(featureID)
+  local mx, my, mz = Spring.GetUnitPosition(unitID)
   local unitDef = UnitDefs[unitDefID]
   local moveDefID = unitDef.moveDef.id
 
   -- Assuming that RequestPath always returns the same result for the same input across all clients
   local path = Spring.RequestPath(moveDefID, mx, my, mz, fx, fy, fz, 0, 0, 0, 0) -- Last 4 zeros are default values for optional arguments
-  
+
   return path ~= nil -- If a path exists, the target is reachable
 end
+
 
 
 -- /////////////////////////////////////////// findNearestEnemy Function
 -- Function to find the nearest enemy and its type
 function findNearestEnemy(unitID, searchRadius)
-  local x, y, z = spGetUnitPosition(unitID)
-  if not x or not z then return nil end  -- Validate unit position
-  local unitsInRadius = Spring.GetUnitsInCylinder(x, z, searchRadius, Spring.ENEMY_UNITS)
-  
+  local unitDefID = Spring.GetUnitDefID(unitID)
 
-  local minDistSq = searchRadius * searchRadius
-  local nearestEnemy, isAirUnit = nil, false
+  if isMyResbot(unitID, unitDefID) then
+    local x, y, z = Spring.GetUnitPosition(unitID)
+    if not x or not z then return nil end  -- Validate unit position
+    local unitsInRadius = Spring.GetUnitsInCylinder(x, z, searchRadius, Spring.ENEMY_UNITS)
 
-  for _, enemyID in ipairs(unitsInRadius) do
-    local enemyDefID = spGetUnitDefID(enemyID)
-    local enemyDef = UnitDefs[enemyDefID]
-    if enemyDef then
-      local ex, ey, ez = spGetUnitPosition(enemyID)
-      local distSq = (x - ex)^2 + (z - ez)^2
-      if distSq < minDistSq then
-        minDistSq = distSq
-        nearestEnemy = enemyID
-        isAirUnit = enemyDef.isAirUnit
+    local minDistSq = searchRadius * searchRadius
+    local nearestEnemy, isAirUnit = nil, false
+
+    for _, enemyID in ipairs(unitsInRadius) do
+      local enemyDefID = Spring.GetUnitDefID(enemyID)
+      local enemyDef = UnitDefs[enemyDefID]
+      if enemyDef then
+        local ex, ey, ez = Spring.GetUnitPosition(enemyID)
+        local distSq = (x - ex)^2 + (z - ez)^2
+        if distSq < minDistSq then
+          minDistSq = distSq
+          nearestEnemy = enemyID
+          isAirUnit = enemyDef.isAirUnit
+        end
       end
     end
-  end
 
-  return nearestEnemy, math.sqrt(minDistSq), isAirUnit
+    return nearestEnemy, math.sqrt(minDistSq), isAirUnit
+  else
+    -- Handle the case where the unit is not a resbot (optional)
+    return nil, nil, nil
+  end
 end
 
 
@@ -760,69 +772,57 @@ end
 
 
 function handleHealing(unitID, unitData)
-  if checkboxes.healing.state and unitData.taskStatus ~= "in_progress" then
-    local nearestDamagedUnit, distance = findNearestDamagedFriendly(unitID, healResurrectRadius)
-    if nearestDamagedUnit and distance < healResurrectRadius then
-        healingTargets[nearestDamagedUnit] = healingTargets[nearestDamagedUnit] or 0
-        if healingTargets[nearestDamagedUnit] < maxHealersPerUnit and not healingUnits[unitID] then
-            Spring.GiveOrderToUnit(unitID, CMD.REPAIR, {nearestDamagedUnit}, {})
-            healingUnits[unitID] = nearestDamagedUnit
-            healingTargets[nearestDamagedUnit] = healingTargets[nearestDamagedUnit] + 1
-            unitData.taskType = "healing"
-            unitData.taskStatus = "in_progress"
-            return true
-        end
+  local unitDefID = Spring.GetUnitDefID(unitID)
+
+  if isMyResbot(unitID, unitDefID) then
+    if checkboxes.healing.state and unitData.taskStatus ~= "in_progress" then
+      local nearestDamagedUnit, distance = findNearestDamagedFriendly(unitID, healResurrectRadius)
+      if nearestDamagedUnit and distance < healResurrectRadius then
+          healingTargets[nearestDamagedUnit] = healingTargets[nearestDamagedUnit] or 0
+          if healingTargets[nearestDamagedUnit] < maxHealersPerUnit and not healingUnits[unitID] then
+              Spring.GiveOrderToUnit(unitID, CMD.REPAIR, {nearestDamagedUnit}, {})
+              healingUnits[unitID] = nearestDamagedUnit
+              healingTargets[nearestDamagedUnit] = healingTargets[nearestDamagedUnit] + 1
+              unitData.taskType = "healing"
+              unitData.taskStatus = "in_progress"
+              return true
+          end
+      end
     end
   end
   return false
 end
+
 
 
 function handleResurrecting(unitID, unitData)
-  if checkboxes.resurrecting.state and unitData.taskStatus ~= "in_progress" then
-      local resurrectableFeatures = resurrectNearbyDeadUnits(unitID, healResurrectRadius)
+  local unitDefID = Spring.GetUnitDefID(unitID)
 
-      -- Debug: Print the number of found resurrectable features
-      -- Spring.Echo("Unit " .. unitID .. " found " .. #resurrectableFeatures .. " resurrectable features")
+  if isMyResbot(unitID, unitDefID) then
+    if checkboxes.resurrecting.state and unitData.taskStatus ~= "in_progress" then
+        local resurrectableFeatures = resurrectNearbyDeadUnits(unitID, healResurrectRadius)
 
-      if #resurrectableFeatures > 0 then
-          local orders = generateOrders(resurrectableFeatures, false, nil, unitID)
-          for _, order in ipairs(orders) do
-              if Spring.ValidFeatureID(order[2] - Game.maxUnits) then
-                  spGiveOrderToUnit(unitID, order[1], order[2], order[3])
-                  unitData.taskType = "resurrecting"
-                  unitData.taskStatus = "in_progress"
+        -- Debug: Print the number of found resurrectable features
+        -- Spring.Echo("Unit " .. unitID .. " found " .. #resurrectableFeatures .. " resurrectable features")
 
-                  -- Debug: Print when a resurrection order is given
-                  -- Spring.Echo("Unit " .. unitID .. " given resurrect order to feature " .. (order[2] - Game.maxUnits))
-                  return true
-              end
-          end
-      else
-          -- Debug: No valid targets, mark as idle to allow transitioning to other tasks
-          -- Spring.Echo("Unit " .. unitID .. " found no valid targets, marked as idle")
-          unitData.taskStatus = "idle"
-          return false
-      end
-  end
-  return false
-end
+        if #resurrectableFeatures > 0 then
+            local orders = generateOrders(resurrectableFeatures, false, nil, unitID)
+            for _, order in ipairs(orders) do
+                if Spring.ValidFeatureID(order[2] - Game.maxUnits) then
+                    spGiveOrderToUnit(unitID, order[1], order[2], order[3])
+                    unitData.taskType = "resurrecting"
+                    unitData.taskStatus = "in_progress"
 
-
-function handleCollecting(unitID, unitData)
-  if checkboxes.collecting.state and unitData.taskStatus ~= "in_progress" then
-    local resourceNeed = assessResourceNeeds()
-    if resourceNeed ~= "full" then
-        local x, y, z = spGetUnitPosition(unitID)
-        local featureID = findReclaimableFeature(unitID, x, z, reclaimRadius, resourceNeed)
-        if featureID and Spring.ValidFeatureID(featureID) then
-            spGiveOrderToUnit(unitID, CMD_RECLAIM, {featureID + Game.maxUnits}, {})
-            unitData.featureCount = 1
-            unitData.lastReclaimedFrame = Spring.GetGameFrame()
-            targetedFeatures[featureID] = (targetedFeatures[featureID] or 0) + 1
-            unitData.taskType = "collecting"
-            unitData.taskStatus = "in_progress"
-            return true
+                    -- Debug: Print when a resurrection order is given
+                    -- Spring.Echo("Unit " .. unitID .. " given resurrect order to feature " .. (order[2] - Game.maxUnits))
+                    return true
+                end
+            end
+        else
+            -- Debug: No valid targets, mark as idle to allow transitioning to other tasks
+            -- Spring.Echo("Unit " .. unitID .. " found no valid targets, marked as idle")
+            unitData.taskStatus = "idle"
+            return false
         end
     end
   end
@@ -830,16 +830,48 @@ function handleCollecting(unitID, unitData)
 end
 
 
-function handleEnemyAvoidance(unitID, unitData)
-  local nearestEnemy, distance = findNearestEnemy(unitID, enemyAvoidanceRadius)
-  if nearestEnemy and distance < enemyAvoidanceRadius then
-      avoidEnemy(unitID, nearestEnemy)
-      unitData.taskType = "avoidingEnemy"
-      unitData.taskStatus = "in_progress"
-      return true
+
+function handleCollecting(unitID, unitData)
+  local unitDefID = Spring.GetUnitDefID(unitID)
+
+  if isMyResbot(unitID, unitDefID) then
+    if checkboxes.collecting.state and unitData.taskStatus ~= "in_progress" then
+      local resourceNeed = assessResourceNeeds()
+      if resourceNeed ~= "full" then
+          local x, y, z = spGetUnitPosition(unitID)
+          local featureID = findReclaimableFeature(unitID, x, z, reclaimRadius, resourceNeed)
+          if featureID and Spring.ValidFeatureID(featureID) then
+              spGiveOrderToUnit(unitID, CMD_RECLAIM, {featureID + Game.maxUnits}, {})
+              unitData.featureCount = 1
+              unitData.lastReclaimedFrame = Spring.GetGameFrame()
+              targetedFeatures[featureID] = (targetedFeatures[featureID] or 0) + 1
+              unitData.taskType = "collecting"
+              unitData.taskStatus = "in_progress"
+              return true
+          end
+      end
+    end
   end
   return false
 end
+
+
+
+function handleEnemyAvoidance(unitID, unitData)
+  local unitDefID = Spring.GetUnitDefID(unitID)
+
+  if isMyResbot(unitID, unitDefID) then
+    local nearestEnemy, distance = findNearestEnemy(unitID, enemyAvoidanceRadius)
+    if nearestEnemy and distance < enemyAvoidanceRadius then
+        avoidEnemy(unitID, nearestEnemy)
+        unitData.taskType = "avoidingEnemy"
+        unitData.taskStatus = "in_progress"
+        return true
+    end
+  end
+  return false
+end
+
 
 
 -- /////////////////////////////////////////// processUnits Function
@@ -931,66 +963,80 @@ end
 
 -- /////////////////////////////////////////// findReclaimableFeature Function
 function findReclaimableFeature(unitID, x, z, searchRadius, resourceNeed)
-  local featuresInRadius = spGetFeaturesInCylinder(x, z, searchRadius)
-  local bestFeature = nil
-  local bestScore = math.huge
+  local unitDefID = Spring.GetUnitDefID(unitID)
 
-  for _, featureID in ipairs(featuresInRadius) do
-      if isTargetReachable(unitID, featureID) then
-          local featureDefID = spGetFeatureDefID(featureID)
-          local featureDef = FeatureDefs[featureDefID]
-          local featureMetal, featureEnergy = getFeatureResources(featureID)
+  if isMyResbot(unitID, unitDefID) then
+    local featuresInRadius = spGetFeaturesInCylinder(x, z, searchRadius)
+    local bestFeature = nil
+    local bestScore = math.huge
 
-          if featureDef and featureDef.reclaimable then
-              local featureX, _, featureZ = Spring.GetFeaturePosition(featureID)
-              local distanceToFeature = ((featureX - x)^2 + (featureZ - z)^2)^0.5
-              local score = calculateResourceScore(featureMetal, featureEnergy, distanceToFeature, resourceNeed)
+    for _, featureID in ipairs(featuresInRadius) do
+        if isTargetReachable(unitID, featureID) then
+            local featureDefID = spGetFeatureDefID(featureID)
+            local featureDef = FeatureDefs[featureDefID]
+            local featureMetal, featureEnergy = getFeatureResources(featureID)
 
-              if score < bestScore and (not targetedFeatures[featureID] or targetedFeatures[featureID] < maxUnitsPerFeature) then
-                  bestScore = score
-                  bestFeature = featureID
-              end
-          end
-      end
+            if featureDef and featureDef.reclaimable then
+                local featureX, _, featureZ = Spring.GetFeaturePosition(featureID)
+                local distanceToFeature = ((featureX - x)^2 + (featureZ - z)^2)^0.5
+                local score = calculateResourceScore(featureMetal, featureEnergy, distanceToFeature, resourceNeed)
+
+                if score < bestScore and (not targetedFeatures[featureID] or targetedFeatures[featureID] < maxUnitsPerFeature) then
+                    bestScore = score
+                    bestFeature = featureID
+                end
+            end
+        end
+    end
+
+    return bestFeature
+  else
+    return nil
   end
-
-  return bestFeature
 end
+
 
 
 
 
 -- ///////////////////////////////////////////  findNearestDamagedFriendly Function
 function findNearestDamagedFriendly(unitID, searchRadius)
-  local myTeamID = spGetMyTeamID() -- Retrieve your team ID
-  local x, y, z = spGetUnitPosition(unitID)
-  local unitsInRadius = Spring.GetUnitsInCylinder(x, z, searchRadius)
+  local unitDefID = Spring.GetUnitDefID(unitID)
 
-  local minDistSq = searchRadius * searchRadius
-  local nearestDamagedUnit = nil
-  for _, otherUnitID in ipairs(unitsInRadius) do
-    if otherUnitID ~= unitID then
-      local unitDefID = spGetUnitDefID(otherUnitID)
-      local unitDef = UnitDefs[unitDefID]
+  if isMyResbot(unitID, unitDefID) then
+    local myTeamID = spGetMyTeamID() -- Retrieve your team ID
+    local x, y, z = spGetUnitPosition(unitID)
+    local unitsInRadius = Spring.GetUnitsInCylinder(x, z, searchRadius)
 
-      if unitDef and not unitDef.isAirUnit then -- Check if the unit is not an air unit
-        local unitTeam = Spring.GetUnitTeam(otherUnitID)
-        if unitTeam == myTeamID then -- Check if the unit belongs to your team
-          local health, maxHealth, _, _, buildProgress = Spring.GetUnitHealth(otherUnitID)
-          if health and maxHealth and health < maxHealth and buildProgress == 1 then
-            local distSq = Spring.GetUnitSeparation(unitID, otherUnitID, true)
-            if distSq < minDistSq then
-              minDistSq = distSq
-              nearestDamagedUnit = otherUnitID
+    local minDistSq = searchRadius * searchRadius
+    local nearestDamagedUnit = nil
+    for _, otherUnitID in ipairs(unitsInRadius) do
+      if otherUnitID ~= unitID then
+        local otherUnitDefID = spGetUnitDefID(otherUnitID)
+        local otherUnitDef = UnitDefs[otherUnitDefID]
+
+        if otherUnitDef and not otherUnitDef.isAirUnit then -- Check if the unit is not an air unit
+          local unitTeam = Spring.GetUnitTeam(otherUnitID)
+          if unitTeam == myTeamID then -- Check if the unit belongs to your team
+            local health, maxHealth, _, _, buildProgress = Spring.GetUnitHealth(otherUnitID)
+            if health and maxHealth and health < maxHealth and buildProgress == 1 then
+              local distSq = Spring.GetUnitSeparation(unitID, otherUnitID, true)
+              if distSq < minDistSq then
+                minDistSq = distSq
+                nearestDamagedUnit = otherUnitID
+              end
             end
           end
         end
       end
     end
-  end
 
-  return nearestDamagedUnit, math.sqrt(minDistSq)
+    return nearestDamagedUnit, math.sqrt(minDistSq)
+  else
+    return nil, nil
+  end
 end
+
 
 
 
@@ -1189,23 +1235,30 @@ function filterFeatures(features)
 end
 
 function generateOrders(features, addToQueue, returnPos, unitID)
-  local orders = {}
+  local unitDefID = Spring.GetUnitDefID(unitID)
 
-  for i, featureID in ipairs(features) do
-      if isTargetReachable(unitID, featureID) then
-          local wreckageDefID = Spring.GetFeatureDefID(featureID)
-          local feature = FeatureDefs[wreckageDefID]
+  if isMyResbot(unitID, unitDefID) then
+    local orders = {}
 
-          -- Check if feature should be resurrected and is reachable
-          if feature.customParams["category"] == "corpses" and checkboxes.resurrecting.state then
-              table.insert(orders, {CMD.RESURRECT, featureID + Game.maxUnits, {"shift = false"}})
-              break  -- Ensures only one order is processed at a time
-          end
-      end
+    for i, featureID in ipairs(features) do
+        if isTargetReachable(unitID, featureID) then
+            local wreckageDefID = Spring.GetFeatureDefID(featureID)
+            local feature = FeatureDefs[wreckageDefID]
+
+            -- Check if feature should be resurrected and is reachable
+            if feature.customParams["category"] == "corpses" and checkboxes.resurrecting.state then
+                table.insert(orders, {CMD.RESURRECT, featureID + Game.maxUnits, {"shift = false"}})
+                break  -- Ensures only one order is processed at a time
+            end
+        end
+    end
+
+    return orders
+  else
+    return {}
   end
-
-  return orders
 end
+
 
 
 
