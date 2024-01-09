@@ -5,7 +5,7 @@ function widget:GetInfo()
     desc      = "RezBots Resurrect, Collect resources, and heal injured units. alt+c to open UI",
     author    = "Tumeden",
     date      = "2024",
-    version   = "v6.4",
+    version   = "v6.5",
     license   = "GNU GPL, v2 or later",
     layer     = 0,
     enabled   = true
@@ -553,57 +553,71 @@ function widget:GameFrame(currentFrame)
   local actionInterval = 60
   local unitsPerFrame = 5
 
+  -- Helper function to get sorted unit IDs
+  local function getSortedUnitIDs(units)
+    local unitIDs = {}
+    for unitID in pairs(units) do
+      table.insert(unitIDs, unitID)
+    end
+    table.sort(unitIDs)
+    return unitIDs
+  end
+
   -- Avoidance check
   if currentFrame % avoidanceCheckInterval == 0 then
-      for unitID, unitData in pairs(unitsToCollect) do
-          local unitDefID = spGetUnitDefID(unitID)
-          if isMyResbot(unitID, unitDefID) then
-              if Spring.ValidUnitID(unitID) and not Spring.GetUnitIsDead(unitID) then
-                  local nearestEnemy, distance = findNearestEnemy(unitID, enemyAvoidanceRadius)
-                  if nearestEnemy and distance < enemyAvoidanceRadius then
-                      avoidEnemy(unitID, nearestEnemy)
-                      unitData.taskType = "avoidingEnemy"
-                      unitData.taskStatus = "in_progress"
-                  end
-              end
+    local sortedUnitIDs = getSortedUnitIDs(unitsToCollect)
+    for _, unitID in ipairs(sortedUnitIDs) do
+      local unitDefID = spGetUnitDefID(unitID)
+      if isMyResbot(unitID, unitDefID) then
+        if Spring.ValidUnitID(unitID) and not Spring.GetUnitIsDead(unitID) then
+          local nearestEnemy, distance = findNearestEnemy(unitID, enemyAvoidanceRadius)
+          if nearestEnemy and distance < enemyAvoidanceRadius then
+            avoidEnemy(unitID, nearestEnemy)
+            unitsToCollect[unitID].taskType = "avoidingEnemy"
+            unitsToCollect[unitID].taskStatus = "in_progress"
           end
+        end
       end
+    end
   end
 
   -- Idle and task check
   if currentFrame % checkInterval == 0 then
-      for unitID, unitData in pairs(unitsToCollect) do
-          if isUnitActuallyIdle(unitID, unitData) then
-              handleIdleUnit(unitID, unitData)
-          end
+    local sortedUnitIDs = getSortedUnitIDs(unitsToCollect)
+    for _, unitID in ipairs(sortedUnitIDs) do
+      if isUnitActuallyIdle(unitID, unitsToCollect[unitID]) then
+        handleIdleUnit(unitID, unitsToCollect[unitID])
       end
+    end
   end
 
   -- Stuck units check
   if currentFrame % stuckCheckInterval == 0 then
-      for unitID, _ in pairs(unitsToCollect) do
-          local unitDefID = spGetUnitDefID(unitID)
-          if isMyResbot(unitID, unitDefID) then
-              if Spring.ValidUnitID(unitID) and not Spring.GetUnitIsDead(unitID) then
-                  handleStuckUnits(unitID, UnitDefs[unitDefID])
-              end
-          end
+    local sortedUnitIDs = getSortedUnitIDs(unitsToCollect)
+    for _, unitID in ipairs(sortedUnitIDs) do
+      local unitDefID = spGetUnitDefID(unitID)
+      if isMyResbot(unitID, unitDefID) then
+        if Spring.ValidUnitID(unitID) and not Spring.GetUnitIsDead(unitID) then
+          handleStuckUnits(unitID, UnitDefs[unitDefID])
+        end
       end
+    end
   end
 
   -- Regular action interval
   if currentFrame % actionInterval == 0 then
-      local processedCount = 0
-      for unitID, _ in pairs(unitsToCollect) do
-          if processedCount >= unitsPerFrame then break end
-          local unitDefID = spGetUnitDefID(unitID)
-          if isMyResbot(unitID, unitDefID) then
-              if Spring.ValidUnitID(unitID) and not Spring.GetUnitIsDead(unitID) then
-                  processUnits({[unitID] = unitsToCollect[unitID]})
-                  processedCount = processedCount + 1
-              end
-          end
+    local sortedUnitIDs = getSortedUnitIDs(unitsToCollect)
+    local processedCount = 0
+    for _, unitID in ipairs(sortedUnitIDs) do
+      if processedCount >= unitsPerFrame then break end
+      local unitDefID = spGetUnitDefID(unitID)
+      if isMyResbot(unitID, unitDefID) then
+        if Spring.ValidUnitID(unitID) and not Spring.GetUnitIsDead(unitID) then
+          processUnits({[unitID] = unitsToCollect[unitID]})
+          processedCount = processedCount + 1
+        end
       end
+    end
   end
 end
 
@@ -656,13 +670,11 @@ function avoidEnemy(unitID, enemyID)
     local dx, dz = ux - ex, uz - ez
     local magnitude = math.sqrt(dx * dx + dz * dz)
 
-    -- Adjusted safe distance calculation
-    local safeDistanceMultiplier = 0.5  -- Retreat half the distance of the avoidance radius
-    local safeDistance = enemyAvoidanceRadius * safeDistanceMultiplier
+    -- Normalize the direction vector
+    dx, dz = dx / magnitude, dz / magnitude
 
-    -- Calculate a safe destination
-    local safeX = ux + (dx / magnitude * safeDistance)
-    local safeZ = uz + (dz / magnitude * safeDistance)
+    -- Use the user-defined multiplier for the distance to move away
+    local safeX, safeZ = ux + dx * enemyAvoidanceRadius, uz + dz * enemyAvoidanceRadius
     local safeY = Spring.GetGroundHeight(safeX, safeZ)
 
     -- Issue a move order to the safe destination
@@ -678,6 +690,7 @@ function avoidEnemy(unitID, enemyID)
     lastAvoidanceTime[unitID] = currentTime
   end
 end
+
 
 
 -- /////////////////////////////////////////// isTargetReachable Function
@@ -831,50 +844,60 @@ end
 
 -- /////////////////////////////////////////// processUnits Function
 function processUnits(units)
-  for unitID, unitData in pairs(units) do
-      local unitDefID = spGetUnitDefID(unitID)
+  -- Extract unitIDs and sort them to ensure deterministic order
+  local unitIDs = {}
+  for unitID in pairs(units) do
+    table.insert(unitIDs, unitID)
+  end
+  table.sort(unitIDs)
 
-      if isMyResbot(unitID, unitDefID) then
-          if not Spring.ValidUnitID(unitID) or Spring.GetUnitIsDead(unitID) then
-              -- Skip invalid or dead units
-          else
-              local _, _, _, _, buildProgress = Spring.GetUnitHealth(unitID)
-              if buildProgress < 1 then
-                  -- Skip units that are still being built
-              else
-                  local taskAssigned = false
+  -- Iterate over sorted unitIDs
+  for _, unitID in ipairs(unitIDs) do
+    local unitData = units[unitID]
+    local unitDefID = spGetUnitDefID(unitID)
 
-                  -- Check for nearby enemies and react if necessary
-                  local nearestEnemy, distance = findNearestEnemy(unitID, enemyAvoidanceRadius)
-                  if nearestEnemy and distance < enemyAvoidanceRadius then
-                      avoidEnemy(unitID, nearestEnemy)
-                      unitData.taskType = "avoidingEnemy"
-                      unitData.taskStatus = "in_progress"
-                      taskAssigned = true
-                  end
+    if isMyResbot(unitID, unitDefID) then
+      if not Spring.ValidUnitID(unitID) or Spring.GetUnitIsDead(unitID) then
+        -- Skip invalid or dead units
+      else
+        local _, _, _, _, buildProgress = Spring.GetUnitHealth(unitID)
+        if buildProgress < 1 then
+          -- Skip units that are still being built
+        else
+          local taskAssigned = false
 
-                  -- Continue with task assignment only if no avoidance is needed
-                  if not taskAssigned then
-                      -- Resurrecting check
-                      if checkboxes.resurrecting.state then
-                          taskAssigned = handleResurrecting(unitID, unitData)
-                      end
-
-                      -- Collecting check
-                      if not taskAssigned and checkboxes.collecting.state then
-                          taskAssigned = handleCollecting(unitID, unitData)
-                      end
-
-                      -- Healing check (lowest priority)
-                      if not taskAssigned and checkboxes.healing.state then
-                          taskAssigned = handleHealing(unitID, unitData)
-                      end
-                  end
-              end
+          -- Check for nearby enemies and react if necessary
+          local nearestEnemy, distance = findNearestEnemy(unitID, enemyAvoidanceRadius)
+          if nearestEnemy and distance < enemyAvoidanceRadius then
+            avoidEnemy(unitID, nearestEnemy)
+            unitData.taskType = "avoidingEnemy"
+            unitData.taskStatus = "in_progress"
+            taskAssigned = true
           end
+
+          -- Continue with task assignment only if no avoidance is needed
+          if not taskAssigned then
+            -- Resurrecting check
+            if checkboxes.resurrecting.state then
+              taskAssigned = handleResurrecting(unitID, unitData)
+            end
+
+            -- Collecting check
+            if not taskAssigned and checkboxes.collecting.state then
+              taskAssigned = handleCollecting(unitID, unitData)
+            end
+
+            -- Healing check (lowest priority)
+            if not taskAssigned and checkboxes.healing.state then
+              taskAssigned = handleHealing(unitID, unitData)
+            end
+          end
+        end
       end
+    end
   end
 end
+
 
 
 
