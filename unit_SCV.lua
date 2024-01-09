@@ -487,6 +487,65 @@ end
 
 
 
+-- ///////////////////////////////////////////  findNearestDamagedFriendly Function
+function findNearestDamagedFriendly(unitID, searchRadius)
+  local myTeamID = spGetMyTeamID() -- Retrieve your team ID
+  local x, y, z = spGetUnitPosition(unitID)
+  local unitsInRadius = Spring.GetUnitsInCylinder(x, z, searchRadius)
+
+  local minDistSq = searchRadius * searchRadius
+  local nearestDamagedUnit = nil
+  for _, otherUnitID in ipairs(unitsInRadius) do
+    if otherUnitID ~= unitID then
+      local unitDefID = spGetUnitDefID(otherUnitID)
+      local unitDef = UnitDefs[unitDefID]
+
+      if unitDef and not unitDef.isAirUnit then -- Check if the unit is not an air unit
+        local unitTeam = Spring.GetUnitTeam(otherUnitID)
+        if unitTeam == myTeamID then -- Check if the unit belongs to your team
+          local health, maxHealth, _, _, buildProgress = Spring.GetUnitHealth(otherUnitID)
+          if health and maxHealth and health < maxHealth and buildProgress == 1 then
+            local distSq = Spring.GetUnitSeparation(unitID, otherUnitID, true)
+            if distSq < minDistSq then
+              minDistSq = distSq
+              nearestDamagedUnit = otherUnitID
+            end
+          end
+        end
+      end
+    end
+  end
+
+  return nearestDamagedUnit, math.sqrt(minDistSq)
+end
+
+
+-- Function to find the nearest enemy and its type
+function findNearestEnemy(unitID, searchRadius)
+  local x, y, z = spGetUnitPosition(unitID)
+  if not x or not z then return nil end  -- Validate unit position
+  local unitsInRadius = Spring.GetUnitsInCylinder(x, z, searchRadius, Spring.ENEMY_UNITS)
+  
+
+  local minDistSq = searchRadius * searchRadius
+  local nearestEnemy, isAirUnit = nil, false
+
+  for _, enemyID in ipairs(unitsInRadius) do
+    local enemyDefID = spGetUnitDefID(enemyID)
+    local enemyDef = UnitDefs[enemyDefID]
+    if enemyDef then
+      local ex, ey, ez = spGetUnitPosition(enemyID)
+      local distSq = (x - ex)^2 + (z - ez)^2
+      if distSq < minDistSq then
+        minDistSq = distSq
+        nearestEnemy = enemyID
+        isAirUnit = enemyDef.isAirUnit
+      end
+    end
+  end
+
+  return nearestEnemy, math.sqrt(minDistSq), isAirUnit
+end
 
 -- ///////////////////////////////////////////  avoidEnemy Function
 function avoidEnemy(unitID, enemyID)
@@ -661,6 +720,22 @@ function processUnits(units)
 end
 
 
+-- /////////////////////////////////////////// calculateResourceScore Function
+function calculateResourceScore(featureMetal, featureEnergy, distance, resourceNeed)
+  local weightDistance = 1  -- Base weight for distance
+  local penaltyNotNeeded = 10000  -- Large penalty if the resource is not needed
+
+  -- Calculate base score using distance
+  local score = distance * weightDistance
+
+  -- Add penalty if the resource is not needed
+  if (resourceNeed == "metal" and featureMetal <= 0) or (resourceNeed == "energy" and featureEnergy <= 0) then
+      score = score + penaltyNotNeeded
+  end
+
+  return score
+end
+
 
 -- /////////////////////////////////////////// findReclaimableFeature Function
 function findReclaimableFeature(unitID, x, z, searchRadius, resourceNeed)
@@ -689,82 +764,9 @@ function findReclaimableFeature(unitID, x, z, searchRadius, resourceNeed)
 end
 
 
--- /////////////////////////////////////////// calculateResourceScore Function
-function calculateResourceScore(featureMetal, featureEnergy, distance, resourceNeed)
-  local weightDistance = 1  -- Base weight for distance
-  local penaltyNotNeeded = 10000  -- Large penalty if the resource is not needed
-
-  -- Calculate base score using distance
-  local score = distance * weightDistance
-
-  -- Add penalty if the resource is not needed
-  if (resourceNeed == "metal" and featureMetal <= 0) or (resourceNeed == "energy" and featureEnergy <= 0) then
-      score = score + penaltyNotNeeded
-  end
-
-  return score
-end
 
 
--- ///////////////////////////////////////////  findNearestDamagedFriendly Function
-function findNearestDamagedFriendly(unitID, searchRadius)
-  local myTeamID = spGetMyTeamID() -- Retrieve your team ID
-  local x, y, z = spGetUnitPosition(unitID)
-  local unitsInRadius = Spring.GetUnitsInCylinder(x, z, searchRadius)
 
-  local minDistSq = searchRadius * searchRadius
-  local nearestDamagedUnit = nil
-  for _, otherUnitID in ipairs(unitsInRadius) do
-    if otherUnitID ~= unitID then
-      local unitDefID = spGetUnitDefID(otherUnitID)
-      local unitDef = UnitDefs[unitDefID]
-
-      if unitDef and not unitDef.isAirUnit then -- Check if the unit is not an air unit
-        local unitTeam = Spring.GetUnitTeam(otherUnitID)
-        if unitTeam == myTeamID then -- Check if the unit belongs to your team
-          local health, maxHealth, _, _, buildProgress = Spring.GetUnitHealth(otherUnitID)
-          if health and maxHealth and health < maxHealth and buildProgress == 1 then
-            local distSq = Spring.GetUnitSeparation(unitID, otherUnitID, true)
-            if distSq < minDistSq then
-              minDistSq = distSq
-              nearestDamagedUnit = otherUnitID
-            end
-          end
-        end
-      end
-    end
-  end
-
-  return nearestDamagedUnit, math.sqrt(minDistSq)
-end
-
-
--- Function to find the nearest enemy and its type
-function findNearestEnemy(unitID, searchRadius)
-  local x, y, z = spGetUnitPosition(unitID)
-  if not x or not z then return nil end  -- Validate unit position
-  local unitsInRadius = Spring.GetUnitsInCylinder(x, z, searchRadius, Spring.ENEMY_UNITS)
-  
-
-  local minDistSq = searchRadius * searchRadius
-  local nearestEnemy, isAirUnit = nil, false
-
-  for _, enemyID in ipairs(unitsInRadius) do
-    local enemyDefID = spGetUnitDefID(enemyID)
-    local enemyDef = UnitDefs[enemyDefID]
-    if enemyDef then
-      local ex, ey, ez = spGetUnitPosition(enemyID)
-      local distSq = (x - ex)^2 + (z - ez)^2
-      if distSq < minDistSq then
-        minDistSq = distSq
-        nearestEnemy = enemyID
-        isAirUnit = enemyDef.isAirUnit
-      end
-    end
-  end
-
-  return nearestEnemy, math.sqrt(minDistSq), isAirUnit
-end
 
 
 
