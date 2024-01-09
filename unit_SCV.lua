@@ -529,11 +529,30 @@ end
 
 -- /////////////////////////////////////////// GameFrame Function
 function widget:GameFrame(currentFrame)
-  local checkInterval = 30  -- Adjust this interval as needed
+  local checkInterval = 30  -- Interval for idle and task checks
+  local avoidanceCheckInterval = 30  -- Interval for avoidance checks
   local stuckCheckInterval = 3000
   local actionInterval = 60
   local unitsPerFrame = 5
 
+  -- Avoidance check
+  if currentFrame % avoidanceCheckInterval == 0 then
+      for unitID, unitData in pairs(unitsToCollect) do
+          local unitDefID = spGetUnitDefID(unitID)
+          if unitDefID == armRectrDefID or unitDefID == corNecroDefID then
+              if Spring.ValidUnitID(unitID) and not Spring.GetUnitIsDead(unitID) then
+                  local nearestEnemy, distance = findNearestEnemy(unitID, enemyAvoidanceRadius)
+                  if nearestEnemy and distance < enemyAvoidanceRadius then
+                      avoidEnemy(unitID, nearestEnemy)
+                      unitData.taskType = "avoidingEnemy"
+                      unitData.taskStatus = "in_progress"
+                  end
+              end
+          end
+      end
+  end
+
+  -- Idle and task check
   if currentFrame % checkInterval == 0 then
       for unitID, unitData in pairs(unitsToCollect) do
           if isUnitActuallyIdle(unitID, unitData) then
@@ -542,18 +561,19 @@ function widget:GameFrame(currentFrame)
       end
   end
 
+  -- Stuck units check
   if currentFrame % stuckCheckInterval == 0 then
       for unitID, _ in pairs(unitsToCollect) do
           local unitDefID = spGetUnitDefID(unitID)
           if unitDefID == armRectrDefID or unitDefID == corNecroDefID then
-              local unitDef = UnitDefs[unitDefID]
-              if unitDef and (unitDef.canReclaim and unitDef.canResurrect) and Spring.ValidUnitID(unitID) and not Spring.GetUnitIsDead(unitID) then
-                  handleStuckUnits(unitID, unitDef)
+              if Spring.ValidUnitID(unitID) and not Spring.GetUnitIsDead(unitID) then
+                  handleStuckUnits(unitID, UnitDefs[unitDefID])
               end
           end
       end
   end
 
+  -- Regular action interval
   if currentFrame % actionInterval == 0 then
       local processedCount = 0
       for unitID, _ in pairs(unitsToCollect) do
@@ -561,7 +581,6 @@ function widget:GameFrame(currentFrame)
           local unitDefID = spGetUnitDefID(unitID)
           if unitDefID == armRectrDefID or unitDefID == corNecroDefID then
               if Spring.ValidUnitID(unitID) and not Spring.GetUnitIsDead(unitID) then
-                  checkAndRetreatIfNeeded(unitID, retreatRadius)
                   processUnits({[unitID] = unitsToCollect[unitID]})
                   processedCount = processedCount + 1
               end
@@ -569,6 +588,7 @@ function widget:GameFrame(currentFrame)
       end
   end
 end
+
 
 function isUnitActuallyIdle(unitID, unitData)
   -- Check if the unitID is valid
