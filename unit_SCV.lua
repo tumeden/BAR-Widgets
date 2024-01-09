@@ -486,6 +486,23 @@ function widget:Initialize()
   -- You can add any additional initialization code here if needed
 
 end
+
+-- ///////////////////////////////////////////  Is the game paused, or over?
+local isGamePaused = false
+
+function widget:GamePaused()
+    isGamePaused = true
+end
+
+function widget:GameUnpaused()
+    isGamePaused = false
+end
+
+function widget:GameOver()
+  widgetHandler:RemoveWidget()
+end
+
+
 -- ///////////////////////////////////////////  isMyResbot Function 
 function isMyResbot(unitID, unitDefID)
   local myTeamID = Spring.GetMyTeamID()
@@ -497,7 +514,7 @@ end
 
 -- ///////////////////////////////////////////  UnitCreated Function
 function widget:UnitCreated(unitID, unitDefID, unitTeam)
-  if unitDefID == armRectrDefID or unitDefID == corNecroDefID then
+  if isMyResbot(unitID, unitDefID) then
     unitsToCollect[unitID] = {
       featureCount = 0,
       lastReclaimedFrame = 0
@@ -512,7 +529,7 @@ end
 function widget:FeatureDestroyed(featureID, allyTeam)
   for unitID, data in pairs(unitsToCollect) do
     local unitDefID = spGetUnitDefID(unitID)
-    if unitDefID == armRectrDefID or unitDefID == corNecroDefID then
+    if isMyResbot(unitID, unitDefID) then
       if data.featureID == featureID then
         data.featureID = nil
         data.lastReclaimedFrame = Spring.GetGameFrame()
@@ -529,6 +546,7 @@ end
 
 -- /////////////////////////////////////////// GameFrame Function
 function widget:GameFrame(currentFrame)
+  if isGamePaused then return end
   local checkInterval = 30  -- Interval for idle and task checks
   local avoidanceCheckInterval = 30  -- Interval for avoidance checks
   local stuckCheckInterval = 3000
@@ -539,7 +557,7 @@ function widget:GameFrame(currentFrame)
   if currentFrame % avoidanceCheckInterval == 0 then
       for unitID, unitData in pairs(unitsToCollect) do
           local unitDefID = spGetUnitDefID(unitID)
-          if unitDefID == armRectrDefID or unitDefID == corNecroDefID then
+          if isMyResbot(unitID, unitDefID) then
               if Spring.ValidUnitID(unitID) and not Spring.GetUnitIsDead(unitID) then
                   local nearestEnemy, distance = findNearestEnemy(unitID, enemyAvoidanceRadius)
                   if nearestEnemy and distance < enemyAvoidanceRadius then
@@ -565,7 +583,7 @@ function widget:GameFrame(currentFrame)
   if currentFrame % stuckCheckInterval == 0 then
       for unitID, _ in pairs(unitsToCollect) do
           local unitDefID = spGetUnitDefID(unitID)
-          if unitDefID == armRectrDefID or unitDefID == corNecroDefID then
+          if isMyResbot(unitID, unitDefID) then
               if Spring.ValidUnitID(unitID) and not Spring.GetUnitIsDead(unitID) then
                   handleStuckUnits(unitID, UnitDefs[unitDefID])
               end
@@ -579,7 +597,7 @@ function widget:GameFrame(currentFrame)
       for unitID, _ in pairs(unitsToCollect) do
           if processedCount >= unitsPerFrame then break end
           local unitDefID = spGetUnitDefID(unitID)
-          if unitDefID == armRectrDefID or unitDefID == corNecroDefID then
+          if isMyResbot(unitID, unitDefID) then
               if Spring.ValidUnitID(unitID) and not Spring.GetUnitIsDead(unitID) then
                   processUnits({[unitID] = unitsToCollect[unitID]})
                   processedCount = processedCount + 1
@@ -625,7 +643,7 @@ function avoidEnemy(unitID, enemyID)
   local unitDefID = spGetUnitDefID(unitID)
 
   -- Check if the unit is a RezBot
-  if unitDefID == armRectrDefID or unitDefID == corNecroDefID then
+  if isMyResbot(unitID, unitDefID) then
     -- Check if the unit is still in cooldown period
     if lastAvoidanceTime[unitID] and (currentTime - lastAvoidanceTime[unitID]) < avoidanceCooldown then
       return -- Skip avoidance if still in cooldown
@@ -819,7 +837,7 @@ function processUnits(units)
   for unitID, unitData in pairs(units) do
       local unitDefID = spGetUnitDefID(unitID)
 
-      if unitDefID == armRectrDefID or unitDefID == corNecroDefID then
+      if isMyResbot(unitID, unitDefID) then
           if not Spring.ValidUnitID(unitID) or Spring.GetUnitIsDead(unitID) then
               -- Skip invalid or dead units
           else
@@ -875,6 +893,22 @@ function getFeatureResources(featureID)
   return featureDef.metal, featureDef.energy
 end
 
+-- /////////////////////////////////////////// calculateResourceScore Function
+function calculateResourceScore(featureMetal, featureEnergy, distance, resourceNeed)
+  local weightDistance = 1  -- Base weight for distance
+  local penaltyNotNeeded = 10000  -- Large penalty if the resource is not needed
+
+  -- Calculate base score using distance
+  local score = distance * weightDistance
+
+  -- Add penalty if the resource is not needed
+  if (resourceNeed == "metal" and featureMetal <= 0) or (resourceNeed == "energy" and featureEnergy <= 0) then
+      score = score + penaltyNotNeeded
+  end
+
+  return score
+end
+
 -- /////////////////////////////////////////// findReclaimableFeature Function
 function findReclaimableFeature(unitID, x, z, searchRadius, resourceNeed)
   local featuresInRadius = spGetFeaturesInCylinder(x, z, searchRadius)
@@ -904,22 +938,6 @@ function findReclaimableFeature(unitID, x, z, searchRadius, resourceNeed)
 end
 
 
-
--- /////////////////////////////////////////// calculateResourceScore Function
-function calculateResourceScore(featureMetal, featureEnergy, distance, resourceNeed)
-  local weightDistance = 1  -- Base weight for distance
-  local penaltyNotNeeded = 10000  -- Large penalty if the resource is not needed
-
-  -- Calculate base score using distance
-  local score = distance * weightDistance
-
-  -- Add penalty if the resource is not needed
-  if (resourceNeed == "metal" and featureMetal <= 0) or (resourceNeed == "energy" and featureEnergy <= 0) then
-      score = score + penaltyNotNeeded
-  end
-
-  return score
-end
 
 
 -- ///////////////////////////////////////////  findNearestDamagedFriendly Function
@@ -1029,7 +1047,7 @@ function checkAndRetreatIfNeeded(unitID, retreatRadius)
   local nearestEnemy, distance = findNearestEnemy(unitID, retreatRadius)
 
   -- Only execute retreat logic if the unit is a rezbot
-  if unitDefID == armRectrDefID or unitDefID == corNecroDefID then
+  if isMyResbot(unitID, unitDefID) then
     if nearestEnemy and distance < retreatRadius then
       -- Issue the move order only if the unit should retreat
       avoidEnemy(unitID, nearestEnemy, distance)
@@ -1117,7 +1135,7 @@ function handleStuckUnits(unitID, unitDef)
       unitDef = UnitDefs[unitDefID]
   end
 
-  if unitDefID == armRectrDefID or unitDefID == corNecroDefID then
+  if isMyResbot(unitID, unitDefID) then
     if isUnitStuck(unitID) then
           -- Directly reassign task to the unit
           unitsToCollect[unitID] = {
