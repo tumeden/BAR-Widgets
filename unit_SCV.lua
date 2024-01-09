@@ -5,7 +5,7 @@ function widget:GetInfo()
     desc      = "RezBots Resurrect, Collect resources, and heal injured units. alt+c to open UI",
     author    = "Tumeden",
     date      = "2024",
-    version   = "v1.02",
+    version   = "v1.03",
     license   = "GNU GPL, v2 or later",
     layer     = 0,
     enabled   = true
@@ -403,6 +403,18 @@ end
 end
 
 
+-- Function to check if a unit is a building
+function isBuilding(unitID)
+  local unitDefID = Spring.GetUnitDefID(unitID)
+  if not unitDefID then return false end  -- Check if unitDefID is valid
+
+  local unitDef = UnitDefs[unitDefID]
+  if not unitDef then return false end  -- Check if unitDef is valid
+
+  -- Check if the unit is a building
+  return unitDef.isBuilding or unitDef.isImmobile or false
+end
+
 
 -- ///////////////////////////////////////////  UnitCreated Function
 function widget:UnitCreated(unitID, unitDefID, unitTeam)
@@ -612,7 +624,48 @@ function getFeatureResources(featureID)
   return featureDef.metal, featureDef.energy
 end
 
+-- /////////////////////////////////////////// calculateResourceScore Function
+function calculateResourceScore(featureMetal, featureEnergy, distance, resourceNeed)
+  local weightDistance = 1  -- Base weight for distance
+  local penaltyNotNeeded = 10000  -- Large penalty if the resource is not needed
 
+  -- Calculate base score using distance
+  local score = distance * weightDistance
+
+  -- Add penalty if the resource is not needed
+  if (resourceNeed == "metal" and featureMetal <= 0) or (resourceNeed == "energy" and featureEnergy <= 0) then
+      score = score + penaltyNotNeeded
+  end
+
+  return score
+end
+
+
+-- /////////////////////////////////////////// findReclaimableFeature Function
+function findReclaimableFeature(unitID, x, z, searchRadius, resourceNeed)
+  local featuresInRadius = spGetFeaturesInCylinder(x, z, searchRadius)
+  local bestFeature = nil
+  local bestScore = math.huge
+
+  for _, featureID in ipairs(featuresInRadius) do
+      local featureDefID = spGetFeatureDefID(featureID)
+      local featureDef = FeatureDefs[featureDefID]
+      local featureMetal, featureEnergy = getFeatureResources(featureID)
+
+      if featureDef and featureDef.reclaimable then
+          local featureX, _, featureZ = Spring.GetFeaturePosition(featureID)
+          local distanceToFeature = ((featureX - x)^2 + (featureZ - z)^2)^0.5
+          local score = calculateResourceScore(featureMetal, featureEnergy, distanceToFeature, resourceNeed)
+
+          if score < bestScore and (not targetedFeatures[featureID] or targetedFeatures[featureID] < maxUnitsPerFeature) then
+              bestScore = score
+              bestFeature = featureID
+          end
+      end
+  end
+
+  return bestFeature
+end
 
 
 -- Healing Function
@@ -719,94 +772,6 @@ function processUnits(units)
   end
 end
 
-
--- /////////////////////////////////////////// calculateResourceScore Function
-function calculateResourceScore(featureMetal, featureEnergy, distance, resourceNeed)
-  local weightDistance = 1  -- Base weight for distance
-  local penaltyNotNeeded = 10000  -- Large penalty if the resource is not needed
-
-  -- Calculate base score using distance
-  local score = distance * weightDistance
-
-  -- Add penalty if the resource is not needed
-  if (resourceNeed == "metal" and featureMetal <= 0) or (resourceNeed == "energy" and featureEnergy <= 0) then
-      score = score + penaltyNotNeeded
-  end
-
-  return score
-end
-
-
--- /////////////////////////////////////////// findReclaimableFeature Function
-function findReclaimableFeature(unitID, x, z, searchRadius, resourceNeed)
-  local featuresInRadius = spGetFeaturesInCylinder(x, z, searchRadius)
-  local bestFeature = nil
-  local bestScore = math.huge
-
-  for _, featureID in ipairs(featuresInRadius) do
-      local featureDefID = spGetFeatureDefID(featureID)
-      local featureDef = FeatureDefs[featureDefID]
-      local featureMetal, featureEnergy = getFeatureResources(featureID)
-
-      if featureDef and featureDef.reclaimable then
-          local featureX, _, featureZ = Spring.GetFeaturePosition(featureID)
-          local distanceToFeature = ((featureX - x)^2 + (featureZ - z)^2)^0.5
-          local score = calculateResourceScore(featureMetal, featureEnergy, distanceToFeature, resourceNeed)
-
-          if score < bestScore and (not targetedFeatures[featureID] or targetedFeatures[featureID] < maxUnitsPerFeature) then
-              bestScore = score
-              bestFeature = featureID
-          end
-      end
-  end
-
-  return bestFeature
-end
-
-
-
-
-
-
-
-
-
-
-local maxFeaturesToConsider = 10 -- Maximum number of features to consider for resurrection
-
-local function filterAndSortFeatures(unitID, features, maxFeatures)
-    local ux, uy, uz = spGetUnitPosition(unitID)
-    local featureData = {}
-
-    for _, featureID in ipairs(features) do
-        local fx, fy, fz = spGetFeaturePosition(featureID)
-        local distanceSq = (ux - fx)^2 + (uz - fz)^2
-        table.insert(featureData, {id = featureID, distanceSq = distanceSq})
-    end
-
-    table.sort(featureData, function(a, b) return a.distanceSq < b.distanceSq end)
-
-    local sortedFeatures = {}
-    for i = 1, math.min(maxFeatures, #featureData) do
-        table.insert(sortedFeatures, featureData[i].id)
-    end
-
-    return sortedFeatures
-end
-
-
-
--- Function to check if a unit is a building
-function isBuilding(unitID)
-  local unitDefID = Spring.GetUnitDefID(unitID)
-  if not unitDefID then return false end  -- Check if unitDefID is valid
-
-  local unitDef = UnitDefs[unitDefID]
-  if not unitDef then return false end  -- Check if unitDef is valid
-
-  -- Check if the unit is a building
-  return unitDef.isBuilding or unitDef.isImmobile or false
-end
 
 
 
@@ -1016,20 +981,22 @@ function generateOrders(features, addToQueue, returnPos)
       local wreckageDefID = Spring.GetFeatureDefID(featureID)
       local feature = FeatureDefs[wreckageDefID]
 
-      -- feature.resurrectable is nonzero for rocks etc. Checking for "corpses" is a workaround.
+      -- Assume feature.resurrectable is used to determine if a feature should be resurrected
       if feature.customParams["category"] == "corpses" then
           table.insert(orders, {CMD.RESURRECT, featureID + Game.maxUnits, {shift = false}})
-      else -- We already filtered out non-reclaimable stuff.
-          table.insert(orders, {CMD.RECLAIM, featureID + Game.maxUnits, {shift = false}})
+      else
+          -- If other orders are needed, handle them here
+          -- Remove or comment out the reclaim logic if it's handled elsewhere
+          -- table.insert(orders, {CMD.RECLAIM, featureID + Game.maxUnits, {shift = false}})
       end
 
       -- Break after the first order to ensure only one task is handled at a time
       break
   end
 
-
   return orders
 end
+
 
 
 
