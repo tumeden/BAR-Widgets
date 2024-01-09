@@ -5,7 +5,7 @@ function widget:GetInfo()
     desc      = "RezBots Resurrect, Collect resources, and heal injured units. alt+c to open UI",
     author    = "Tumeden",
     date      = "2024",
-    version   = "v6.3",
+    version   = "v6.4",
     license   = "GNU GPL, v2 or later",
     layer     = 0,
     enabled   = true
@@ -686,17 +686,14 @@ function isTargetReachable(unitID, featureID)
   local mx, my, mz = spGetUnitPosition(unitID)
   local unitDefID = spGetUnitDefID(unitID)
   local unitDef = UnitDefs[unitDefID]
-  local moveDefID = unitDef.moveDef.id  -- This gets the moveDefID
+  local moveDefID = unitDef.moveDef.id
 
-  local path = Spring.RequestPath(moveDefID, mx, my, mz, fx, fy, fz)  -- Corrected argument
-
-  if path then
-      local waypoints, pathDetails = path:GetPathWayPoints()
-      return waypoints and #waypoints > 0
-  else
-      return false
-  end
+  -- Assuming that RequestPath always returns the same result for the same input across all clients
+  local path = Spring.RequestPath(moveDefID, mx, my, mz, fx, fy, fz, 0, 0, 0, 0) -- Last 4 zeros are default values for optional arguments
+  
+  return path ~= nil -- If a path exists, the target is reachable
 end
+
 
 -- /////////////////////////////////////////// findNearestEnemy Function
 -- Function to find the nearest enemy and its type
@@ -1056,49 +1053,50 @@ function checkAndRetreatIfNeeded(unitID, retreatRadius)
 end
 
 
-
-
 -- ///////////////////////////////////////////  UnitIdle Function
 function widget:UnitIdle(unitID)
   local unitDefID = spGetUnitDefID(unitID)
   if not unitDefID then return end  -- Check if unitDefID is valid
 
-  -- Check if the unit is one of the types we are interested in managing
-  if unitDefID ~= armRectrDefID and unitDefID ~= corNecroDefID then return end
+  -- Use the isMyResbot function to check if the unit is one of the types we are interested in managing
+  if isMyResbot(unitID, unitDefID) then
 
-  -- Initialize unitData if it does not exist for this unit
-  local unitData = unitsToCollect[unitID]
-  if not unitData then
+    -- Initialize unitData if it does not exist for this unit
+    local unitData = unitsToCollect[unitID]
+    if not unitData then
       unitData = {
-          featureCount = 0,
-          lastReclaimedFrame = 0,
-          taskStatus = "idle",
-          featureID = nil  -- Initialize all fields that will be used
+        featureCount = 0,
+        lastReclaimedFrame = 0,
+        taskStatus = "idle",
+        featureID = nil  -- Initialize all fields that will be used
       }
       unitsToCollect[unitID] = unitData
-  else
+    else
       unitData.taskStatus = "idle"
       unitData.featureID = nil  -- Reset featureID since the unit is idle now
-  end
+    end
 
-  -- Clear the unit from resurrecting status if it was in the process
-  if resurrectingUnits[unitID] then
+    -- Clear the unit from resurrecting status if it was in the process
+    if resurrectingUnits[unitID] then
       resurrectingUnits[unitID] = nil
-  end
+    end
 
-  -- Clear any healing assignment
-  if healingUnits[unitID] then
+    -- Clear any healing assignment
+    if healingUnits[unitID] then
       local healedUnitID = healingUnits[unitID]
       healingTargets[healedUnitID] = (healingTargets[healedUnitID] or 0) - 1
       if healingTargets[healedUnitID] <= 0 then
-          healingTargets[healedUnitID] = nil
+        healingTargets[healedUnitID] = nil
       end
       healingUnits[unitID] = nil
-  end
+    end
 
-  -- Re-queue the unit for tasks based on the current checkbox states
-  processUnits({[unitID] = unitData})
+    -- Re-queue the unit for tasks based on the current checkbox states
+    processUnits({[unitID] = unitData})
+  end  -- This 'end' closes the if statement
 end
+
+
 
 
 
