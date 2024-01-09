@@ -5,7 +5,7 @@ function widget:GetInfo()
     desc      = "RezBots Resurrect, Collect resources, and heal injured units. alt+c to open UI",
     author    = "Tumeden",
     date      = "2024",
-    version   = "v6.2",
+    version   = "v6.3",
     license   = "GNU GPL, v2 or later",
     layer     = 0,
     enabled   = true
@@ -32,7 +32,7 @@ local targetedFeatures = {}  -- Table to keep track of targeted features
 local maxUnitsPerFeature = 4  -- Maximum units allowed to target the same feature
 local healingTargets = {}  -- Track which units are being healed and by how many healers
 local maxHealersPerUnit = 4  -- Maximum number of healers per unit
-local healResurrectRadius = 1000 -- Set your desired heal/resurrect radius here  (default 1000,  anything larger will cause significant lag)
+local healResurrectRadius = 1000 -- Set your desired heal/resurrect radius here  (default 1000,  anything larger can cause significant lag)
 local reclaimRadius = 1500 -- Set your desired reclaim radius here (any number works, 4000 is about half a large map)
 local retreatRadius = 425  -- The detection area around the SCV unit, which causes it to retreat.
 local enemyAvoidanceRadius = 925  -- Adjust this value as needed -- Define a safe distance for enemy avoidance
@@ -711,85 +711,142 @@ function assessResourceNeeds()
 end
 
 
+function handleHealing(unitID, unitData)
+  if checkboxes.healing.state and unitData.taskStatus ~= "in_progress" then
+    local nearestDamagedUnit, distance = findNearestDamagedFriendly(unitID, healResurrectRadius)
+    if nearestDamagedUnit and distance < healResurrectRadius then
+        healingTargets[nearestDamagedUnit] = healingTargets[nearestDamagedUnit] or 0
+        if healingTargets[nearestDamagedUnit] < maxHealersPerUnit and not healingUnits[unitID] then
+            Spring.GiveOrderToUnit(unitID, CMD.REPAIR, {nearestDamagedUnit}, {})
+            healingUnits[unitID] = nearestDamagedUnit
+            healingTargets[nearestDamagedUnit] = healingTargets[nearestDamagedUnit] + 1
+            unitData.taskType = "healing"
+            unitData.taskStatus = "in_progress"
+            return true
+        end
+    end
+  end
+  return false
+end
+
+
+function handleResurrecting(unitID, unitData)
+  if checkboxes.resurrecting.state and unitData.taskStatus ~= "in_progress" then
+      local resurrectableFeatures = resurrectNearbyDeadUnits(unitID, healResurrectRadius)
+
+      -- Debug: Print the number of found resurrectable features
+      -- Spring.Echo("Unit " .. unitID .. " found " .. #resurrectableFeatures .. " resurrectable features")
+
+      if #resurrectableFeatures > 0 then
+          local orders = generateOrders(resurrectableFeatures, false, nil, unitID)
+          for _, order in ipairs(orders) do
+              if Spring.ValidFeatureID(order[2] - Game.maxUnits) then
+                  spGiveOrderToUnit(unitID, order[1], order[2], order[3])
+                  unitData.taskType = "resurrecting"
+                  unitData.taskStatus = "in_progress"
+
+                  -- Debug: Print when a resurrection order is given
+                  -- Spring.Echo("Unit " .. unitID .. " given resurrect order to feature " .. (order[2] - Game.maxUnits))
+                  return true
+              end
+          end
+      else
+          -- Debug: No valid targets, mark as idle to allow transitioning to other tasks
+          -- Spring.Echo("Unit " .. unitID .. " found no valid targets, marked as idle")
+          unitData.taskStatus = "idle"
+          return false
+      end
+  end
+  return false
+end
+
+
+function handleCollecting(unitID, unitData)
+  if checkboxes.collecting.state and unitData.taskStatus ~= "in_progress" then
+    local resourceNeed = assessResourceNeeds()
+    if resourceNeed ~= "full" then
+        local x, y, z = spGetUnitPosition(unitID)
+        local featureID = findReclaimableFeature(unitID, x, z, reclaimRadius, resourceNeed)
+        if featureID and Spring.ValidFeatureID(featureID) then
+            spGiveOrderToUnit(unitID, CMD_RECLAIM, {featureID + Game.maxUnits}, {})
+            unitData.featureCount = 1
+            unitData.lastReclaimedFrame = Spring.GetGameFrame()
+            targetedFeatures[featureID] = (targetedFeatures[featureID] or 0) + 1
+            unitData.taskType = "collecting"
+            unitData.taskStatus = "in_progress"
+            return true
+        end
+    end
+  end
+  return false
+end
+
+
+function handleEnemyAvoidance(unitID, unitData)
+  local nearestEnemy, distance = findNearestEnemy(unitID, enemyAvoidanceRadius)
+  if nearestEnemy and distance < enemyAvoidanceRadius then
+      avoidEnemy(unitID, nearestEnemy)
+      unitData.taskType = "avoidingEnemy"
+      unitData.taskStatus = "in_progress"
+      return true
+  end
+  return false
+end
+
+
 -- /////////////////////////////////////////// processUnits Function
 function processUnits(units)
   for unitID, unitData in pairs(units) do
-    local unitDefID = spGetUnitDefID(unitID)
-    if unitDefID == armRectrDefID or unitDefID == corNecroDefID then
-      -- Check if unit is valid and exists
-      if not Spring.ValidUnitID(unitID) or Spring.GetUnitIsDead(unitID) then
-          return -- Skip invalid or dead units
-      end
+      local unitDefID = spGetUnitDefID(unitID)
 
-      -- Check if the unit is fully built
-      local _, _, _, _, buildProgress = Spring.GetUnitHealth(unitID)
-      if buildProgress < 1 then
-          -- Skip this unit as it's still being built
-          return
-      end
+      if unitDefID == armRectrDefID or unitDefID == corNecroDefID then
+          if not Spring.ValidUnitID(unitID) or Spring.GetUnitIsDead(unitID) then
+              -- Skip invalid or dead units
+          else
+              local _, _, _, _, buildProgress = Spring.GetUnitHealth(unitID)
+              if buildProgress < 1 then
+                  -- Skip units that are still being built
+              else
+                  local taskAssigned = false
 
-      -- Avoid enemies if necessary
-      local nearestEnemy, distance = findNearestEnemy(unitID, enemyAvoidanceRadius)
-      if nearestEnemy and distance < enemyAvoidanceRadius then
-          avoidEnemy(unitID, nearestEnemy)
-          unitData.taskType = "avoidingEnemy"
-          unitData.taskStatus = "in_progress"
-      end
+                  -- Check for nearby enemies and react if necessary
+                  local nearestEnemy, distance = findNearestEnemy(unitID, enemyAvoidanceRadius)
+                  if nearestEnemy and distance < enemyAvoidanceRadius then
+                      avoidEnemy(unitID, nearestEnemy)
+                      unitData.taskType = "avoidingEnemy"
+                      unitData.taskStatus = "in_progress"
+                      taskAssigned = true
+                  end
 
+                  -- Continue with task assignment only if no avoidance is needed
+                  if not taskAssigned then
+                      -- Resurrecting check
+                      if checkboxes.resurrecting.state then
+                          taskAssigned = handleResurrecting(unitID, unitData)
+                      end
 
-      -- Healing Logic
-      if checkboxes.healing.state and unitData.taskStatus ~= "in_progress" then
-        local nearestDamagedUnit, distance = findNearestDamagedFriendly(unitID, healResurrectRadius)
-        if nearestDamagedUnit and distance < healResurrectRadius then
-            healingTargets[nearestDamagedUnit] = healingTargets[nearestDamagedUnit] or 0
-            if healingTargets[nearestDamagedUnit] < maxHealersPerUnit and not healingUnits[unitID] then
-                Spring.GiveOrderToUnit(unitID, CMD.REPAIR, {nearestDamagedUnit}, {})
-                healingUnits[unitID] = nearestDamagedUnit
-                healingTargets[nearestDamagedUnit] = healingTargets[nearestDamagedUnit] + 1
-                unitData.taskType = "healing"
-                unitData.taskStatus = "in_progress"
-            end
-        end
-    end
+                      -- Collecting check
+                      if not taskAssigned and checkboxes.collecting.state then
+                          taskAssigned = handleCollecting(unitID, unitData)
+                      end
 
-
-  
-
-      if checkboxes.resurrecting.state and unitData.taskStatus ~= "in_progress" then
-          local resurrectableFeatures = resurrectNearbyDeadUnits(unitID, healResurrectRadius)
-          if #resurrectableFeatures > 0 then
-              local orders = generateOrders(resurrectableFeatures, false, nil, unitID)
-              for _, order in ipairs(orders) do
-                  if Spring.ValidFeatureID(order[2] - Game.maxUnits) then
-                      spGiveOrderToUnit(unitID, order[1], order[2], order[3])
+                      -- Healing check (lowest priority)
+                      if not taskAssigned and checkboxes.healing.state then
+                          taskAssigned = handleHealing(unitID, unitData)
+                      end
                   end
               end
-              unitData.taskType = "resurrecting"
-              unitData.taskStatus = "in_progress"
-              resurrectingUnits[unitID] = true
           end
       end
-      -- Assess resource needs
-      local resourceNeed = assessResourceNeeds()
-      if resourceNeed == "full" then
-          -- Skip resource collection because resources are full
-          return
-      end
-      if checkboxes.collecting.state and unitData.taskStatus ~= "in_progress" then
-          local x, y, z = spGetUnitPosition(unitID)
-          local featureID = findReclaimableFeature(unitID, x, z, reclaimRadius, resourceNeed)
-          if featureID and Spring.ValidFeatureID(featureID) then
-              spGiveOrderToUnit(unitID, CMD_RECLAIM, {featureID + Game.maxUnits}, {})
-              unitData.featureCount = 1
-              unitData.lastReclaimedFrame = Spring.GetGameFrame()
-              targetedFeatures[featureID] = (targetedFeatures[featureID] or 0) + 1
-              unitData.taskType = "reclaiming"
-              unitData.taskStatus = "in_progress"
-          end
-      end
-    end
   end
 end
+
+
+
+
+
+
+
 
 -- /////////////////////////////////////////// getFeatureResources Function
 function getFeatureResources(featureID)
@@ -967,8 +1024,9 @@ end
 function widget:UnitIdle(unitID)
   local unitDefID = spGetUnitDefID(unitID)
   if not unitDefID then return end  -- Check if unitDefID is valid
-  local unitDef = UnitDefs[unitDefID]
-  if not unitDef then return end  -- Check if unitDef is valid
+
+  -- Check if the unit is one of the types we are interested in managing
+  if unitDefID ~= armRectrDefID and unitDefID ~= corNecroDefID then return end
 
   -- Initialize unitData if it does not exist for this unit
   local unitData = unitsToCollect[unitID]
@@ -977,11 +1035,12 @@ function widget:UnitIdle(unitID)
           featureCount = 0,
           lastReclaimedFrame = 0,
           taskStatus = "idle",
-          featureID = nil  -- Make sure to initialize all fields that will be used
+          featureID = nil  -- Initialize all fields that will be used
       }
       unitsToCollect[unitID] = unitData
   else
       unitData.taskStatus = "idle"
+      unitData.featureID = nil  -- Reset featureID since the unit is idle now
   end
 
   -- Clear the unit from resurrecting status if it was in the process
@@ -989,23 +1048,7 @@ function widget:UnitIdle(unitID)
       resurrectingUnits[unitID] = nil
   end
 
-  -- Re-queue the unit for tasks based on the checkbox states
-  if (unitDef.canReclaim and checkboxes.collecting.state) or
-     (unitDef.canResurrect and checkboxes.resurrecting.state) or
-     (unitDef.canRepair and checkboxes.healing.state) then
-      processUnits({[unitID] = unitData})
-  end
-
-  -- Manage targeted features and healing units
-  if unitData.featureID then
-      targetedFeatures[unitData.featureID] = (targetedFeatures[unitData.featureID] or 0) - 1
-      if targetedFeatures[unitData.featureID] <= 0 then
-          targetedFeatures[unitData.featureID] = nil
-      end
-      unitData.featureID = nil  -- Reset featureID since the unit is idle now
-  end
-
-  -- Clean up any state related to healing, resurrecting, or collecting
+  -- Clear any healing assignment
   if healingUnits[unitID] then
       local healedUnitID = healingUnits[unitID]
       healingTargets[healedUnitID] = (healingTargets[healedUnitID] or 0) - 1
@@ -1015,7 +1058,8 @@ function widget:UnitIdle(unitID)
       healingUnits[unitID] = nil
   end
 
-  -- Additional cleanup or re-queue logic can go here, if needed
+  -- Re-queue the unit for tasks based on the current checkbox states
+  processUnits({[unitID] = unitData})
 end
 
 
@@ -1069,7 +1113,21 @@ end
 
 
 
+function filterFeatures(features)
+  local filteredFeatures = {}
 
+  -- Filter out trees, tombstones, etc.
+  for _, featureID in ipairs(features) do
+      local wreckageDefID = Spring.GetFeatureDefID(featureID)
+      local feature = FeatureDefs[wreckageDefID]
+
+      if feature.reclaimable and (feature.metal > 0) then
+          table.insert(filteredFeatures, featureID)
+      end
+  end
+
+  return filteredFeatures
+end
 
 function generateOrders(features, addToQueue, returnPos, unitID)
   local orders = {}
@@ -1081,7 +1139,7 @@ function generateOrders(features, addToQueue, returnPos, unitID)
 
           -- Check if feature should be resurrected and is reachable
           if feature.customParams["category"] == "corpses" and checkboxes.resurrecting.state then
-              table.insert(orders, {CMD.RESURRECT, featureID + Game.maxUnits, {"shift"}})
+              table.insert(orders, {CMD.RESURRECT, featureID + Game.maxUnits, {"shift = false"}})
               break  -- Ensures only one order is processed at a time
           end
       end
@@ -1207,7 +1265,7 @@ function orderFeatureIdsByEfficientTraversalPath(unitId, featureIds, optimizedPa
 
   -- Check if firstId was found
   if not firstId then
-      Spring.Echo("Warning: firstId is nil after processing features. No features were found within range or all features are invalid.")
+      -- Spring.Echo("Warning: firstId is nil after processing features. No features were found within range or all features are invalid.")
       return {} -- Return an empty table if no valid firstId found
   end
 
