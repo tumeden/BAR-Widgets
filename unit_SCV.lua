@@ -5,7 +5,7 @@ function widget:GetInfo()
     desc      = "RezBots Resurrect, Collect resources, and heal injured units. alt+c to open UI",
     author    = "Tumeden",
     date      = "2024",
-    version   = "v1.07",
+    version   = "v1.08",
     license   = "GNU GPL, v2 or later",
     layer     = 0,
     enabled   = true
@@ -451,20 +451,33 @@ end
 
 -- /////////////////////////////////////////// GameFrame Function
 function widget:GameFrame(currentFrame)
-  local stuckCheckInterval = 3000
+  local stuckCheckInterval = 1000
+  local resourceCheckInterval = 300  -- Interval to check and reassign tasks based on resource status
   local actionInterval = 60
-  local unitsPerFrame = 5
 
-      -- Check units moving to safety
-      for unitID, _ in pairs(unitsMovingToSafety) do
-        if not findNearestEnemy(unitID, enemyAvoidanceRadius) then
-            -- No enemy nearby, set the unit to idle
-            if unitsToCollect[unitID] then
-                unitsToCollect[unitID].taskStatus = "idle"
-            end
-            unitsMovingToSafety[unitID] = nil
-        end
-    end
+  -- Check units moving to safety
+  for unitID, _ in pairs(unitsMovingToSafety) do
+      if not findNearestEnemy(unitID, enemyAvoidanceRadius) then
+          -- No enemy nearby, set the unit to idle
+          if unitsToCollect[unitID] then
+              unitsToCollect[unitID].taskStatus = "idle"
+          end
+          unitsMovingToSafety[unitID] = nil
+      end
+  end
+
+  if currentFrame % actionInterval == 0 then
+      -- Process all units for enemy avoidance and other tasks
+      for unitID, _ in pairs(unitsToCollect) do
+          local unitDefID = spGetUnitDefID(unitID)
+          if isMyResbot(unitID, unitDefID) then
+              if Spring.ValidUnitID(unitID) and not Spring.GetUnitIsDead(unitID) then
+                  maintainSafeDistanceFromEnemy(unitID, enemyAvoidanceRadius)
+                  processUnits({[unitID] = unitsToCollect[unitID]})
+              end
+          end
+      end
+  end
 
   if currentFrame % stuckCheckInterval == 0 then
       for unitID, _ in pairs(unitsToCollect) do
@@ -475,16 +488,12 @@ function widget:GameFrame(currentFrame)
       end
   end
 
-  if currentFrame % actionInterval == 0 then
-      local processedCount = 0
-      for unitID, _ in pairs(unitsToCollect) do
-          if processedCount >= unitsPerFrame then break end
-          local unitDefID = spGetUnitDefID(unitID)
-          if isMyResbot(unitID, unitDefID) then
-              if Spring.ValidUnitID(unitID) and not Spring.GetUnitIsDead(unitID) then
-                  maintainSafeDistanceFromEnemy(unitID, enemyAvoidanceRadius)
-                  processUnits({[unitID] = unitsToCollect[unitID]})
-                  processedCount = processedCount + 1
+  if currentFrame % resourceCheckInterval == 0 then
+      local resourceNeed = assessResourceNeeds()
+      if resourceNeed ~= "full" then
+          for unitID, unitData in pairs(unitsToCollect) do
+              if unitData.taskStatus == "idle" or unitData.taskStatus == "completed" then
+                  processUnits({[unitID] = unitData})
               end
           end
       end
@@ -559,35 +568,37 @@ end
 
 -- ///////////////////////////////////////////  maintainSafeDistanceFromEnemy Function
 function maintainSafeDistanceFromEnemy(unitID, avoidanceRadius)
-    local nearestEnemy, distance, isAirUnit = findNearestEnemy(unitID, avoidanceRadius)
-    if nearestEnemy and distance < avoidanceRadius then
-        -- Reduce the avoidance radius for air units
-        local effectiveAvoidanceRadius = isAirUnit and (avoidanceRadius * 0.25) or avoidanceRadius
+  local nearestEnemy, distance, isAirUnit = findNearestEnemy(unitID, avoidanceRadius)
+  if nearestEnemy and distance < avoidanceRadius then
+      -- Reduce the avoidance radius for air units
+      local effectiveAvoidanceRadius = isAirUnit and (avoidanceRadius * 0.25) or avoidanceRadius
 
-        if distance < effectiveAvoidanceRadius then
-            local ux, uy, uz = spGetUnitPosition(unitID)
-            local ex, ey, ez = spGetUnitPosition(nearestEnemy)
+      if distance < effectiveAvoidanceRadius then
+          local ux, uy, uz = spGetUnitPosition(unitID)
+          local ex, ey, ez = spGetUnitPosition(nearestEnemy)
 
-            -- Calculate a direction vector away from the enemy
-            local dx, dz = ux - ex, uz - ez
-            local magnitude = math.sqrt(dx * dx + dz * dz)
+          -- Calculate a direction vector away from the enemy
+          local dx, dz = ux - ex, uz - ez
+          local magnitude = math.sqrt(dx * dx + dz * dz)
 
-            -- Calculate a safe destination
-            local safeDistance = effectiveAvoidanceRadius
-            local safeX = ux + (dx / magnitude * safeDistance)
-            local safeZ = uz + (dz / magnitude * safeDistance)
-            local safeY = Spring.GetGroundHeight(safeX, safeZ)
+          -- Calculate a safe destination
+          local safeDistance = effectiveAvoidanceRadius
+          local safeX = ux + (dx / magnitude * safeDistance)
+          local safeZ = uz + (dz / magnitude * safeDistance)
+          local safeY = Spring.GetGroundHeight(safeX, safeZ)
 
-            -- Issue a move order to the safe destination
-            spGiveOrderToUnit(unitID, CMD.MOVE, {safeX, safeY, safeZ}, {})
-            
-            -- Track the unit
-            unitsMovingToSafety[unitID] = true
-        end
-    else
-        -- If no enemy is near, remove the unit from tracking
-        unitsMovingToSafety[unitID] = nil
-    end
+          -- Issue a move order to the safe destination
+          spGiveOrderToUnit(unitID, CMD.MOVE, {safeX, safeY, safeZ}, {})
+          
+          -- Track the unit as moving to safety
+          unitsMovingToSafety[unitID] = true
+          return true -- Indicate that the unit is avoiding an enemy
+      end
+  else
+      -- If no enemy is near, remove the unit from tracking
+      unitsMovingToSafety[unitID] = nil
+      return false -- No enemy avoidance needed
+  end
 end
 
 
@@ -680,6 +691,9 @@ function performHealing(unitID, unitData)
           healingTargets[nearestDamagedUnit] = healingTargets[nearestDamagedUnit] + 1
           unitData.taskType = "healing"
           unitData.taskStatus = "in_progress"
+        else
+          -- Explicitly mark the unit as idle if no damaged unit is found
+          unitData.taskStatus = "idle"
       end
   end
 end
