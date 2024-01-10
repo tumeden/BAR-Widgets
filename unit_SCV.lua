@@ -5,7 +5,7 @@ function widget:GetInfo()
     desc      = "RezBots Resurrect, Collect resources, and heal injured units. alt+c to open UI",
     author    = "Tumeden",
     date      = "2024",
-    version   = "v1.05",
+    version   = "v1.06",
     license   = "GNU GPL, v2 or later",
     layer     = 0,
     enabled   = true
@@ -22,6 +22,7 @@ end
 
 -- /////////////////////////////////////////// Important things :))
 local widgetEnabled = true
+local unitsMovingToSafety = {}
 local resurrectingUnits = {}  -- table to keep track of units currently resurrecting
 local unitsToCollect = {}  -- table to keep track of units and their collection state
 local healingUnits = {}  -- table to keep track of healing units
@@ -375,14 +376,7 @@ end
 -- ///////////////////////////////////////////  processUnits Function
 function processUnits(units)
   for unitID, unitData in pairs(units) do
-      local unitDefID = spGetUnitDefID(unitID)
-      if unitDefID == armRectrDefID or unitDefID == corNecroDefID then
-
-          -- Check if the unit is fully built
-          local _, _, _, _, buildProgress = Spring.GetUnitHealth(unitID)
-          if buildProgress < 1 then
-              return  -- Skip this unit as it's still being built
-          end
+      if isMyResbot(unitID, spGetUnitDefID(unitID)) then  -- Use isMyResbot to check if the unit is a Resbot
 
           -- Resurrecting Logic
           if checkboxes.resurrecting.state and unitData.taskStatus ~= "in_progress" then
@@ -408,7 +402,7 @@ end
 
 -- ///////////////////////////////////////////  UnitCreated Function
 function widget:UnitCreated(unitID, unitDefID, unitTeam)
-  if unitDefID == armRectrDefID or unitDefID == corNecroDefID then
+  if isMyResbot(unitID, unitDefID) then  -- Use isMyResbot to check if the unit is a Resbot
     unitsToCollect[unitID] = {
       featureCount = 0,
       lastReclaimedFrame = 0
@@ -423,7 +417,7 @@ end
 function widget:FeatureDestroyed(featureID, allyTeam)
   for unitID, data in pairs(unitsToCollect) do
     local unitDefID = spGetUnitDefID(unitID)
-    if unitDefID == armRectrDefID or unitDefID == corNecroDefID then
+    if isMyResbot(unitID, unitDefID) then  -- Use isMyResbot to check if the unit is a Resbot
       if data.featureID == featureID then
         data.featureID = nil
         data.lastReclaimedFrame = Spring.GetGameFrame()
@@ -459,6 +453,17 @@ function widget:GameFrame(currentFrame)
   local stuckCheckInterval = 3000
   local actionInterval = 60
   local unitsPerFrame = 5
+
+      -- Check units moving to safety
+      for unitID, _ in pairs(unitsMovingToSafety) do
+        if not findNearestEnemy(unitID, enemyAvoidanceRadius) then
+            -- No enemy nearby, set the unit to idle
+            if unitsToCollect[unitID] then
+                unitsToCollect[unitID].taskStatus = "idle"
+            end
+            unitsMovingToSafety[unitID] = nil
+        end
+    end
 
   if currentFrame % stuckCheckInterval == 0 then
       for unitID, _ in pairs(unitsToCollect) do
@@ -553,25 +558,37 @@ end
 
 -- ///////////////////////////////////////////  maintainSafeDistanceFromEnemy Function
 function maintainSafeDistanceFromEnemy(unitID, avoidanceRadius)
-  local nearestEnemy, distance = findNearestEnemy(unitID, avoidanceRadius)
-  if nearestEnemy and distance < avoidanceRadius then
-      local ux, uy, uz = spGetUnitPosition(unitID)
-      local ex, ey, ez = spGetUnitPosition(nearestEnemy)
+    local nearestEnemy, distance, isAirUnit = findNearestEnemy(unitID, avoidanceRadius)
+    if nearestEnemy and distance < avoidanceRadius then
+        -- Reduce the avoidance radius for air units
+        local effectiveAvoidanceRadius = isAirUnit and (avoidanceRadius * 0.25) or avoidanceRadius
 
-      -- Calculate a direction vector away from the enemy
-      local dx, dz = ux - ex, uz - ez
-      local magnitude = math.sqrt(dx * dx + dz * dz)
+        if distance < effectiveAvoidanceRadius then
+            local ux, uy, uz = spGetUnitPosition(unitID)
+            local ex, ey, ez = spGetUnitPosition(nearestEnemy)
 
-      -- Calculate a safe destination
-      local safeDistance = avoidanceRadius
-      local safeX = ux + (dx / magnitude * safeDistance)
-      local safeZ = uz + (dz / magnitude * safeDistance)
-      local safeY = Spring.GetGroundHeight(safeX, safeZ)
+            -- Calculate a direction vector away from the enemy
+            local dx, dz = ux - ex, uz - ez
+            local magnitude = math.sqrt(dx * dx + dz * dz)
 
-      -- Issue a move order to the safe destination
-      spGiveOrderToUnit(unitID, CMD.MOVE, {safeX, safeY, safeZ}, {})
-  end
+            -- Calculate a safe destination
+            local safeDistance = effectiveAvoidanceRadius
+            local safeX = ux + (dx / magnitude * safeDistance)
+            local safeZ = uz + (dz / magnitude * safeDistance)
+            local safeY = Spring.GetGroundHeight(safeX, safeZ)
+
+            -- Issue a move order to the safe destination
+            spGiveOrderToUnit(unitID, CMD.MOVE, {safeX, safeY, safeZ}, {})
+            
+            -- Track the unit
+            unitsMovingToSafety[unitID] = true
+        end
+    else
+        -- If no enemy is near, remove the unit from tracking
+        unitsMovingToSafety[unitID] = nil
+    end
 end
+
 
 
 
@@ -676,13 +693,16 @@ function performCollection(unitID, unitData)
       local x, y, z = spGetUnitPosition(unitID)
       local featureID = findReclaimableFeature(unitID, x, z, reclaimRadius, resourceNeed)
       if featureID and Spring.ValidFeatureID(featureID) then
-          spGiveOrderToUnit(unitID, CMD_RECLAIM, {featureID + Game.maxUnits}, {})
-          unitData.featureCount = 1
-          unitData.lastReclaimedFrame = Spring.GetGameFrame()
-          targetedFeatures[featureID] = (targetedFeatures[featureID] or 0) + 1
-          unitData.taskType = "reclaiming"
-          unitData.taskStatus = "in_progress"
-          return true
+          -- Exclude buildings if checkbox is checked
+          if not (checkboxes.excludeBuildings.state and isBuilding(featureID)) then
+              spGiveOrderToUnit(unitID, CMD_RECLAIM, {featureID + Game.maxUnits}, {})
+              unitData.featureCount = 1
+              unitData.lastReclaimedFrame = Spring.GetGameFrame()
+              targetedFeatures[featureID] = (targetedFeatures[featureID] or 0) + 1
+              unitData.taskType = "reclaiming"
+              unitData.taskStatus = "in_progress"
+              return true
+          end
       end
   end
   return false
@@ -698,13 +718,16 @@ function performResurrection(unitID, unitData)
           local wreckageDefID = Spring.GetFeatureDefID(featureID)
           local feature = FeatureDefs[wreckageDefID]
 
-          if feature.customParams["category"] == "corpses" then
-              if Spring.ValidFeatureID(featureID) then
-                  spGiveOrderToUnit(unitID, CMD.RESURRECT, {featureID + Game.maxUnits}, {})
-                  unitData.taskType = "resurrecting"
-                  unitData.taskStatus = "in_progress"
-                  resurrectingUnits[unitID] = true
-                  return -- Exit after issuing the first valid order
+          -- Exclude buildings if checkbox is checked
+          if not (checkboxes.excludeBuildings.state and isBuilding(featureID)) then
+              if feature.customParams["category"] == "corpses" then
+                  if Spring.ValidFeatureID(featureID) then
+                      spGiveOrderToUnit(unitID, CMD.RESURRECT, {featureID + Game.maxUnits}, {})
+                      unitData.taskType = "resurrecting"
+                      unitData.taskStatus = "in_progress"
+                      resurrectingUnits[unitID] = true
+                      return -- Exit after issuing the first valid order
+                  end
               end
           end
       end
@@ -856,7 +879,7 @@ function handleStuckUnits(unitID, unitDef)
       unitDef = UnitDefs[unitDefID]
   end
 
-  if unitDefID == armRectrDefID or unitDefID == corNecroDefID then
+  if isMyResbot(unitID, unitDefID) then  -- Use isMyResbot to check if the unit is a Resbot
     if isUnitStuck(unitID) then
           -- Directly reassign task to the unit
           unitsToCollect[unitID] = {
