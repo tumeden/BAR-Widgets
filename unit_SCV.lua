@@ -5,13 +5,12 @@ function widget:GetInfo()
     desc      = "RezBots Resurrect, Collect resources, and heal injured units. alt+c to open UI",
     author    = "Tumeden",
     date      = "2024",
-    version   = "v1.04",
+    version   = "v1.05",
     license   = "GNU GPL, v2 or later",
     layer     = 0,
     enabled   = true
   }
 end
-
 
 
 
@@ -25,17 +24,15 @@ end
 local widgetEnabled = true
 local resurrectingUnits = {}  -- table to keep track of units currently resurrecting
 local unitsToCollect = {}  -- table to keep track of units and their collection state
-local lastAvoidanceTime = {} -- Table to track the last avoidance time for each unit
 local healingUnits = {}  -- table to keep track of healing units
 local unitLastPosition = {} -- Track the last position of each unit
 local targetedFeatures = {}  -- Table to keep track of targeted features
 local maxUnitsPerFeature = 4  -- Maximum units allowed to target the same feature
 local healingTargets = {}  -- Track which units are being healed and by how many healers
 local maxHealersPerUnit = 4  -- Maximum number of healers per unit
-local healResurrectRadius = 1000 -- Set your desired heal/resurrect radius here  (default 1000,  anything larger will cause significant lag)
+local healResurrectRadius = 1000 -- Set your desired heal/resurrect radius here  (default 1000)
 local reclaimRadius = 1500 -- Set your desired reclaim radius here (any number works, 4000 is about half a large map)
-local enemyAvoidanceRadius = 925  -- Adjust this value as needed -- Define a safe distance for enemy avoidance
-local avoidanceCooldown = 30 -- Cooldown in game frames, 30 Default.
+local enemyAvoidanceRadius = 675  -- Adjust this value as needed -- Define a safe distance for enemy avoidance
 
 -- Engine call optimizations
 -- =========================
@@ -313,7 +310,6 @@ end
 
 
 
-
 -- /////////////////////////////////////////// Initialize Function
 function widget:Initialize()
   
@@ -410,7 +406,6 @@ end
 
 
 
-
 -- ///////////////////////////////////////////  UnitCreated Function
 function widget:UnitCreated(unitID, unitDefID, unitTeam)
   if unitDefID == armRectrDefID or unitDefID == corNecroDefID then
@@ -458,6 +453,7 @@ function widget:FeatureDestroyed(featureID, allyTeam)
 end
 
 
+
 -- /////////////////////////////////////////// GameFrame Function
 function widget:GameFrame(currentFrame)
   local stuckCheckInterval = 3000
@@ -488,7 +484,6 @@ function widget:GameFrame(currentFrame)
       end
   end
 end
-
 
 
 
@@ -523,6 +518,7 @@ function findNearestDamagedFriendly(unitID, searchRadius)
 
   return nearestDamagedUnit, math.sqrt(minDistSq)
 end
+
 
 
 -- ///////////////////////////////////////////  findNearestEnemy Function
@@ -579,6 +575,7 @@ end
 
 
 
+
 -- ///////////////////////////////////////////  assessResourceNeeds Function
 function assessResourceNeeds(unitID, unitData)
   local myTeamID = Spring.GetMyTeamID()
@@ -589,16 +586,16 @@ function assessResourceNeeds(unitID, unitData)
   local energyFull = currentEnergy >= storageEnergy * 0.75  -- 75% full
 
   if metalFull and energyFull then
-    unitData.taskStatus = "idle"
     return "full"
   elseif metalFull then
     return "metal" -- Changed from "energy" to "metal" if metal storage is full
   elseif energyFull then
     return "energy" -- Changed from "metal" to "energy" if energy storage is full
   else
-    unitData.taskStatus = "idle"
+    return nil
   end
 end
+
 
 
 function getFeatureResources(featureID)
@@ -606,6 +603,8 @@ function getFeatureResources(featureID)
   local featureDef = FeatureDefs[featureDefID]
   return featureDef.metal, featureDef.energy
 end
+
+
 
 -- /////////////////////////////////////////// calculateResourceScore Function
 function calculateResourceScore(featureMetal, featureEnergy, distance, resourceNeed)
@@ -622,6 +621,7 @@ function calculateResourceScore(featureMetal, featureEnergy, distance, resourceN
 
   return score
 end
+
 
 
 -- /////////////////////////////////////////// findReclaimableFeature Function
@@ -651,6 +651,7 @@ function findReclaimableFeature(unitID, x, z, searchRadius, resourceNeed)
 end
 
 
+
 -- Healing Function
 function performHealing(unitID, unitData)
   local nearestDamagedUnit, distance = findNearestDamagedFriendly(unitID, healResurrectRadius)
@@ -665,6 +666,8 @@ function performHealing(unitID, unitData)
       end
   end
 end
+
+
 
 -- Collection Function
 function performCollection(unitID, unitData)
@@ -684,6 +687,8 @@ function performCollection(unitID, unitData)
   end
   return false
 end
+
+
 
 -- Resurrection Function
 function performResurrection(unitID, unitData)
@@ -708,11 +713,6 @@ function performResurrection(unitID, unitData)
   -- No features to resurrect, mark as idle to reassign
   unitData.taskStatus = "idle"
 end
-
-
-
-
-
 
 
 
@@ -765,8 +765,6 @@ function resurrectNearbyDeadUnits(unitID, healResurrectRadius)
 
   return featureIDs
 end
-
-
 
 
 
@@ -828,10 +826,6 @@ end
 
 
 
-
-
-
-
 -- ///////////////////////////////////////////  isUnitStuck Function
 local lastStuckCheck = {}
 local checkInterval = 1000  -- Number of game frames to wait between checks
@@ -851,6 +845,7 @@ function isUnitStuck(unitID)
   unitLastPosition[unitID] = {x = x, y = y, z = z}
   return stuck
 end
+
 
 
 -- ///////////////////////////////////////////  handleStuckUnits Function
@@ -873,7 +868,3 @@ function handleStuckUnits(unitID, unitDef)
       end
   end
 end
-
-
-
-
