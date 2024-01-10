@@ -5,7 +5,7 @@ function widget:GetInfo()
     desc      = "RezBots Resurrect, Collect resources, and heal injured units. alt+c to open UI",
     author    = "Tumeden",
     date      = "2024",
-    version   = "v1.03",
+    version   = "v1.04",
     license   = "GNU GPL, v2 or later",
     layer     = 0,
     enabled   = true
@@ -38,7 +38,7 @@ local retreatRadius = 425  -- The detection area around the SCV unit, which caus
 local enemyAvoidanceRadius = 925  -- Adjust this value as needed -- Define a safe distance for enemy avoidance
 local avoidanceCooldown = 30 -- Cooldown in game frames, 30 Default.
 
--- engine call optimizations
+-- Engine call optimizations
 -- =========================
 local armRectrDefID
 local corNecroDefID
@@ -48,61 +48,20 @@ local spGetUnitPosition = Spring.GetUnitPosition
 local spGetFeaturesInCylinder = Spring.GetFeaturesInCylinder
 local spGetFeatureDefID = Spring.GetFeatureDefID
 local spGetMyTeamID = Spring.GetMyTeamID
-
-local spEcho = Spring.Echo
 local spGetUnitHealth = Spring.GetUnitHealth
 local spGetUnitsInCylinder = Spring.GetUnitsInCylinder
 local spGetUnitIsDead = Spring.GetUnitIsDead
 local spValidUnitID = Spring.ValidUnitID
 local spGetTeamResources = Spring.GetTeamResources
-local SpringGetUnitDefID = Spring.GetUnitDefID
-local SpringGetUnitTeam = Spring.GetUnitTeam
-local SpringGetSpectatingState = Spring.GetSpectatingState
-local SpringGetMyTeamID = Spring.GetMyTeamID
-local SpringGetCommandQueue = Spring.GetCommandQueue
-local SpringGiveOrderToUnit = Spring.GiveOrderToUnit
-local SpringGetTeamUnits = Spring.GetTeamUnits
-local SpringGetSelectedUnits = Spring.GetSelectedUnits
-local SpringGetTeamAllyTeamID = Spring.GetTeamAllyTeamID
-local SpringShareResources = Spring.ShareResources
-local SpringGetUnitPosition = Spring.GetUnitPosition
-local SpringGiveOrderToUnitArray = Spring.GiveOrderToUnitArray
-local SpringGetCameraState = Spring.GetCameraState
-local SpringIsGUIHidden = Spring.IsGUIHidden
-local SpringIsUnitSelected = Spring.IsUnitSelected
-local SpringGetUnitRadius = Spring.GetUnitRadius
-local SpringGetTeamColor = Spring.GetTeamColor
-local SpringGetModKeyState = Spring.GetModKeyState
-local SpringWorldToScreenCoords = Spring.WorldToScreenCoords
-local SpringSelectUnitArray = Spring.SelectUnitArray
-local SpringI18N = Spring.I18N
-local SpringIsSphereInView = Spring.IsSphereInView
-local SpringGetTeamList = Spring.GetTeamList
-local SpringGetTeamInfo = Spring.GetTeamInfo
-local SpringGetUnitHealth = Spring.GetUnitHealth
-local spGetGroundHeight = Spring.GetGroundHeight
 local spGetFeaturePosition = Spring.GetFeaturePosition
 local spGetUnitCommands = Spring.GetUnitCommands
+
+-- Command Definitions
 local CMD_MOVE = CMD.MOVE
 local CMD_RESURRECT = CMD.RESURRECT
 local CMD_RECLAIM = CMD.RECLAIM
-local glText = gl.Text
-local glRect = gl.Rect
-local glColor = gl.Color
-local glTranslate = gl.Translate
-local glPushMatrix = gl.PushMatrix
-local glPopMatrix = gl.PopMatrix
-local glDeleteList = gl.DeleteList
-local glCreateList = gl.CreateList
-local glCallList = gl.CallList
-local glColor = gl.Color
-local glPushMatrix = gl.PushMatrix
-local glTranslate = gl.Translate
-local glPopMatrix = gl.PopMatrix
-local glVertex = gl.Vertex
-local glBeginEnd = gl.BeginEnd
-local glLineWidth = gl.LineWidth
-local glScale = gl.Scale
+
+-- Mathematical and Table Functions
 local sqrt = math.sqrt
 local pow = math.pow
 local mathMax = math.max
@@ -119,8 +78,14 @@ local tblSort = table.sort
 local strFormat = string.format
 local strSub = string.sub
 
+-- Utility functions
 local findNearestEnemy = findNearestEnemy
 local getFeatureResources = getFeatureResources
+
+-- OpenGL functions
+local glVertex = gl.Vertex
+local glBeginEnd = gl.BeginEnd
+
 
 
 
@@ -706,18 +671,26 @@ end
 function performResurrection(unitID, unitData)
   local resurrectableFeatures = resurrectNearbyDeadUnits(unitID, healResurrectRadius)
   if #resurrectableFeatures > 0 then
-      local orders = generateOrders(resurrectableFeatures, false, nil)
-      for _, order in ipairs(orders) do
-          if Spring.ValidFeatureID(order[2] - Game.maxUnits) then
-              spGiveOrderToUnit(unitID, order[1], order[2], order[3])
+      for i, featureID in ipairs(resurrectableFeatures) do
+          local wreckageDefID = Spring.GetFeatureDefID(featureID)
+          local feature = FeatureDefs[wreckageDefID]
+
+          if feature.customParams["category"] == "corpses" then
+              if Spring.ValidFeatureID(featureID) then
+                  spGiveOrderToUnit(unitID, CMD.RESURRECT, {featureID + Game.maxUnits}, {})
+                  unitData.taskType = "resurrecting"
+                  unitData.taskStatus = "in_progress"
+                  resurrectingUnits[unitID] = true
+                  return -- Exit after issuing the first valid order
+              end
           end
       end
-      unitData.taskType = "resurrecting"
-      unitData.taskStatus = "in_progress"
-      resurrectingUnits[unitID] = true
-      return
   end
+
+  -- No features to resurrect, mark as idle to reassign
+  unitData.taskStatus = "idle"
 end
+
 
 
 -- ///////////////////////////////////////////  processUnits Function
@@ -845,9 +818,6 @@ end
 
 
 
-
-
-
 -- ///////////////////////////////////////////  UnitIdle Function
 function widget:UnitIdle(unitID)
   local unitDefID = spGetUnitDefID(unitID)
@@ -907,9 +877,6 @@ end
 
 
 
-
-
-
 -- ///////////////////////////////////////////  isUnitStuck Function
 local lastStuckCheck = {}
 local checkInterval = 1000  -- Number of game frames to wait between checks
@@ -953,221 +920,5 @@ function handleStuckUnits(unitID, unitDef)
 end
 
 
-
--- /////////// TESTING STUFF 
-
-
-
-local function filterFeatures(features)
-  local filteredFeatures = {}
-
-  -- Filter out trees, tombstones, etc.
-  for _, featureID in ipairs(features) do
-      local wreckageDefID = Spring.GetFeatureDefID(featureID)
-      local feature = FeatureDefs[wreckageDefID]
-
-      if feature.reclaimable and (feature.metal > 0) then
-          table.insert(filteredFeatures, featureID)
-      end
-  end
-
-  return filteredFeatures
-end
-
-function generateOrders(features, addToQueue, returnPos)
-  local orders = {}
-
-  for i, featureID in ipairs(features) do
-      local wreckageDefID = Spring.GetFeatureDefID(featureID)
-      local feature = FeatureDefs[wreckageDefID]
-
-      -- Assume feature.resurrectable is used to determine if a feature should be resurrected
-      if feature.customParams["category"] == "corpses" then
-          table.insert(orders, {CMD.RESURRECT, featureID + Game.maxUnits, {shift = false}})
-      else
-          -- If other orders are needed, handle them here
-          -- Remove or comment out the reclaim logic if it's handled elsewhere
-          -- table.insert(orders, {CMD.RECLAIM, featureID + Game.maxUnits, {shift = false}})
-      end
-
-      -- Break after the first order to ensure only one task is handled at a time
-      break
-  end
-
-  return orders
-end
-
-
-
-
--- Calculates the 2D Euclidean distance between two points
-local function dist2D(x1, z1, x2, z2)
-  return math.sqrt((x2 - x1) ^ 2 + (z2 - z1) ^ 2)
-end
-
--- Computes the total distance of the path that visits all the features in the given order
-local function computePathDistance(order, positions)
-  local distance = 0
-  for i = 2, #order do
-      local x1, _, z1 = unpack(positions[order[i - 1]])
-      local x2, _, z2 = unpack(positions[order[i]])
-      distance = distance + dist2D(x1, z1, x2, z2)
-  end
-  return distance
-end
-
--- Applies the 2-opt heuristic to the given path to find a locally optimal solution
-local function optimizePath(path, positions)
-  local improved = true
-  while improved do
-      improved = false
-      for i = 1, #path - 2 do
-          for j = i + 1, #path - 1 do
-              local order = {}
-              for k = 1, #path do
-                  if k < i or k > j then
-                      table.insert(order, path[k])
-                  end
-              end
-              for k = j, i, -1 do
-                  table.insert(order, path[k])
-              end
-              for k = j + 1, #path do
-                  table.insert(order, path[k])
-              end
-              local newDist = computePathDistance(order, positions)
-              local oldDist = computePathDistance(path, positions)
-              if newDist < oldDist then
-                  path = order
-                  improved = true
-              end
-          end
-      end
-  end
-  return path
-end
-
-function orderFeatureIdsByEfficientTraversalPath(unitId, featureIds, optimizedPathsCache)
-  -- Ensure cache is initialized
-  optimizedPathsCache = optimizedPathsCache or {}
-
-  -- Verify featureIds contains valid IDs
-  if not featureIds or #featureIds == 0 then
-     -- Spring.Echo("Warning: No valid feature IDs provided to orderFeatureIdsByEfficientTraversalPath")
-      return {} -- Return an empty table if no features to process
-  end
-
-  -- Get the positions of the unit and features
-  local positions = {}
-  positions[unitId] = {Spring.GetUnitPosition(unitId)}
-  for _, id in ipairs(featureIds) do
-      positions[id] = {Spring.GetFeaturePosition(id)}
-  end
-
-  -- Apply the nearest neighbor algorithm to find a suboptimal solution
-  local path = {unitId}
-  local visited = {[unitId] = true}
-  local firstId = nil
-
-  while #path < #featureIds + 1 do
-      local bestDist = math.huge
-      local bestId = nil
-      for _, id in ipairs(featureIds) do
-          if not visited[id] then
-              local currentFeatureId = path[#path]
-              local currentFeaturePos = positions[currentFeatureId]
-              local nextFeaturePos = positions[id]
-              if currentFeaturePos and nextFeaturePos then
-                  local dist = dist2D(currentFeaturePos[1], currentFeaturePos[3], nextFeaturePos[1], nextFeaturePos[3])
-                  if not bestId or dist < bestDist then
-                      bestDist = dist
-                      bestId = id
-                  end
-              end
-          end
-      end
-
-      if bestId then
-          if not firstId then
-              firstId = bestId
-          end
-          table.insert(path, bestId)
-          visited[bestId] = true
-      else
-          break -- No unvisited features left, exit loop
-      end
-  end
-
-  -- Apply the 2-opt heuristic to improve the solution
-  path = optimizePath(path, positions)
-
-  -- Remove the starting unit from the path
-  table.remove(path, 1)
-
-  -- Return the ordered featureIds
-  local orderedFeatureIds = {}
-  for _, id in ipairs(path) do
-      if id ~= unitId then -- Ensure not to add the unitId itself
-          orderedFeatureIds[#orderedFeatureIds + 1] = id
-      end
-  end
-
-  -- Check if firstId was found
-  if not firstId then
-      Spring.Echo("Warning: firstId is nil after processing features. No features were found within range or all features are invalid.")
-      return {} -- Return an empty table if no valid firstId found
-  end
-
-    -- Add result to cache.
-    if firstId ~= nil then
-      optimizedPathsCache[firstId] = orderedFeatureIds
-  end
-
-  return orderedFeatureIds
-end
-
-
-
--- Helper function: Applies the 2-opt heuristic to the given path to find a locally optimal solution
-function optimizePath(path, positions)
-  local improved = true
-  while improved do
-      improved = false
-      for i = 1, #path - 2 do
-          for j = i + 1, #path - 1 do
-              local order = {}
-              for k = 1, #path do
-                  if k < i or k > j then
-                      table.insert(order, path[k])
-                  end
-              end
-              for k = j, i, -1 do
-                  table.insert(order, path[k])
-              end
-              for k = j + 1, #path do
-                  table.insert(order, path[k])
-              end
-              local newDist = computePathDistance(order, positions)
-              local oldDist = computePathDistance(path, positions)
-              if newDist < oldDist then
-                  path = order
-                  improved = true
-              end
-          end
-      end
-  end
-  return path
-end
-
--- Helper function: Computes the total distance of the path that visits all the features in the given order
-function computePathDistance(order, positions)
-  local distance = 0
-  for i = 2, #order do
-      local x1, _, z1 = unpack(positions[order[i - 1]])
-      local x2, _, z2 = unpack(positions[order[i]])
-      distance = distance + dist2D(x1, z1, x2, z2)
-  end
-  return distance
-end
 
 
