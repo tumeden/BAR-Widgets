@@ -34,7 +34,6 @@ local healingTargets = {}  -- Track which units are being healed and by how many
 local maxHealersPerUnit = 4  -- Maximum number of healers per unit
 local healResurrectRadius = 1000 -- Set your desired heal/resurrect radius here  (default 1000,  anything larger will cause significant lag)
 local reclaimRadius = 1500 -- Set your desired reclaim radius here (any number works, 4000 is about half a large map)
-local retreatRadius = 425  -- The detection area around the SCV unit, which causes it to retreat.
 local enemyAvoidanceRadius = 925  -- Adjust this value as needed -- Define a safe distance for enemy avoidance
 local avoidanceCooldown = 30 -- Cooldown in game frames, 30 Default.
 
@@ -115,8 +114,7 @@ local checkboxes = {
 local sliders = {
   healResurrectRadius = { x = windowPos.x + 50, y = windowPos.y + 200, width = 200, value = healResurrectRadius, min = 0, max = 2000, label = "Heal/Resurrect Radius" },
   reclaimRadius = { x = windowPos.x + 50, y = windowPos.y + 230, width = 200, value = reclaimRadius, min = 0, max = 5000, label = "Resource Collection Radius" },
-  retreatRadius = { x = windowPos.x + 50, y = windowPos.y + 260, width = 200, value = retreatRadius, min = 0, max = 2000, label = "Retreat Distance" },
-  enemyAvoidanceRadius = { x = windowPos.x + 50, y = windowPos.y + 290, width = 200, value = enemyAvoidanceRadius, min = 0, max = 2000, label = "Enemy Avoidance Radius" },
+  enemyAvoidanceRadius = { x = windowPos.x + 50, y = windowPos.y + 290, width = 200, value = enemyAvoidanceRadius, min = 0, max = 2000, label = "Maintain Safe Distance" },
 }
 
 
@@ -284,8 +282,6 @@ function widget:MouseMove(x, y, dx, dy, button)
           healResurrectRadius = newValue
       elseif activeSlider == sliders.reclaimRadius then
           reclaimRadius = newValue
-      elseif activeSlider == sliders.retreatRadius then
-          retreatRadius = newValue
       elseif activeSlider == sliders.enemyAvoidanceRadius then
           enemyAvoidanceRadius = newValue
       end
@@ -380,6 +376,40 @@ function isBuilding(unitID)
   return unitDef.isBuilding or unitDef.isImmobile or false
 end
 
+-- ///////////////////////////////////////////  processUnits Function
+function processUnits(units)
+  for unitID, unitData in pairs(units) do
+      local unitDefID = spGetUnitDefID(unitID)
+      if unitDefID == armRectrDefID or unitDefID == corNecroDefID then
+
+          -- Check if the unit is fully built
+          local _, _, _, _, buildProgress = Spring.GetUnitHealth(unitID)
+          if buildProgress < 1 then
+              return  -- Skip this unit as it's still being built
+          end
+
+          -- Resurrecting Logic
+          if checkboxes.resurrecting.state and unitData.taskStatus ~= "in_progress" then
+              performResurrection(unitID, unitData)
+              if resurrectingUnits[unitID] then return end
+          end
+
+          -- Collecting Logic
+          if checkboxes.collecting.state and unitData.taskStatus ~= "in_progress" then
+              local featureCollected = performCollection(unitID, unitData)
+              if featureCollected then return end
+          end
+
+          -- Healing Logic
+          if checkboxes.healing.state and unitData.taskStatus ~= "in_progress" then
+              performHealing(unitID, unitData)
+          end
+      end
+  end
+end
+
+
+
 
 -- ///////////////////////////////////////////  UnitCreated Function
 function widget:UnitCreated(unitID, unitDefID, unitTeam)
@@ -437,11 +467,8 @@ function widget:GameFrame(currentFrame)
   if currentFrame % stuckCheckInterval == 0 then
       for unitID, _ in pairs(unitsToCollect) do
           local unitDefID = spGetUnitDefID(unitID)
-          if unitDefID == armRectrDefID or unitDefID == corNecroDefID then
-              local unitDef = UnitDefs[unitDefID]
-              if unitDef and (unitDef.canReclaim and unitDef.canResurrect) and Spring.ValidUnitID(unitID) and not Spring.GetUnitIsDead(unitID) then
-                  handleStuckUnits(unitID, unitDef)
-              end
+          if isMyResbot(unitID, unitDefID) then
+              handleStuckUnits(unitID, UnitDefs[unitDefID])
           end
       end
   end
@@ -451,9 +478,9 @@ function widget:GameFrame(currentFrame)
       for unitID, _ in pairs(unitsToCollect) do
           if processedCount >= unitsPerFrame then break end
           local unitDefID = spGetUnitDefID(unitID)
-          if unitDefID == armRectrDefID or unitDefID == corNecroDefID then
+          if isMyResbot(unitID, unitDefID) then
               if Spring.ValidUnitID(unitID) and not Spring.GetUnitIsDead(unitID) then
-                  checkAndRetreatIfNeeded(unitID, retreatRadius)
+                  maintainSafeDistanceFromEnemy(unitID, enemyAvoidanceRadius)
                   processUnits({[unitID] = unitsToCollect[unitID]})
                   processedCount = processedCount + 1
               end
@@ -461,6 +488,7 @@ function widget:GameFrame(currentFrame)
       end
   end
 end
+
 
 
 
@@ -497,6 +525,7 @@ function findNearestDamagedFriendly(unitID, searchRadius)
 end
 
 
+-- ///////////////////////////////////////////  findNearestEnemy Function
 -- Function to find the nearest enemy and its type
 function findNearestEnemy(unitID, searchRadius)
   local x, y, z = spGetUnitPosition(unitID)
@@ -524,47 +553,34 @@ function findNearestEnemy(unitID, searchRadius)
   return nearestEnemy, math.sqrt(minDistSq), isAirUnit
 end
 
--- ///////////////////////////////////////////  avoidEnemy Function
-function avoidEnemy(unitID, enemyID)
-  local currentTime = Spring.GetGameFrame()
 
-  -- Retrieve unitDefID for the unit
-  local unitDefID = spGetUnitDefID(unitID)
 
-  -- Check if the unit is a RezBot
-  if unitDefID == armRectrDefID or unitDefID == corNecroDefID then
-    -- Check if the unit is still in cooldown period
-    if lastAvoidanceTime[unitID] and (currentTime - lastAvoidanceTime[unitID]) < avoidanceCooldown then
-      return -- Skip avoidance if still in cooldown
-    end
+-- ///////////////////////////////////////////  maintainSafeDistanceFromEnemy Function
+function maintainSafeDistanceFromEnemy(unitID, avoidanceRadius)
+  local nearestEnemy, distance = findNearestEnemy(unitID, avoidanceRadius)
+  if nearestEnemy and distance < avoidanceRadius then
+      local ux, uy, uz = spGetUnitPosition(unitID)
+      local ex, ey, ez = spGetUnitPosition(nearestEnemy)
 
-    local ux, uy, uz = spGetUnitPosition(unitID)
-    local ex, ey, ez = spGetUnitPosition(enemyID)
+      -- Calculate a direction vector away from the enemy
+      local dx, dz = ux - ex, uz - ez
+      local magnitude = math.sqrt(dx * dx + dz * dz)
 
-    -- Calculate a direction vector away from the enemy
-    local dx, dz = ux - ex, uz - ez
-    local magnitude = math.sqrt(dx * dx + dz * dz)
+      -- Calculate a safe destination
+      local safeDistance = avoidanceRadius
+      local safeX = ux + (dx / magnitude * safeDistance)
+      local safeZ = uz + (dz / magnitude * safeDistance)
+      local safeY = Spring.GetGroundHeight(safeX, safeZ)
 
-    -- Adjusted safe distance calculation
-    local safeDistanceMultiplier = 0.5  -- Retreat half the distance of the avoidance radius
-    local safeDistance = enemyAvoidanceRadius * safeDistanceMultiplier
-
-    -- Calculate a safe destination
-    local safeX = ux + (dx / magnitude * safeDistance)
-    local safeZ = uz + (dz / magnitude * safeDistance)
-    local safeY = Spring.GetGroundHeight(safeX, safeZ)
-
-    -- Issue a move order to the safe destination
-    spGiveOrderToUnit(unitID, CMD.MOVE, {safeX, safeY, safeZ}, {})
-
-    -- Update the last avoidance time for this unit
-    lastAvoidanceTime[unitID] = currentTime
+      -- Issue a move order to the safe destination
+      spGiveOrderToUnit(unitID, CMD.MOVE, {safeX, safeY, safeZ}, {})
   end
 end
 
 
+
 -- ///////////////////////////////////////////  assessResourceNeeds Function
-function assessResourceNeeds()
+function assessResourceNeeds(unitID, unitData)
   local myTeamID = Spring.GetMyTeamID()
   local currentMetal, storageMetal = Spring.GetTeamResources(myTeamID, "metal")
   local currentEnergy, storageEnergy = Spring.GetTeamResources(myTeamID, "energy")
@@ -573,15 +589,17 @@ function assessResourceNeeds()
   local energyFull = currentEnergy >= storageEnergy * 0.75  -- 75% full
 
   if metalFull and energyFull then
-    return "none"
+    unitData.taskStatus = "idle"
+    return "full"
   elseif metalFull then
-    return "energy"
+    return "metal" -- Changed from "energy" to "metal" if metal storage is full
   elseif energyFull then
-    return "metal"
+    return "energy" -- Changed from "metal" to "energy" if energy storage is full
   else
-    return "proximity" -- Neither resource is full, focus on proximity
+    unitData.taskStatus = "idle"
   end
 end
+
 
 function getFeatureResources(featureID)
   local featureDefID = spGetFeatureDefID(featureID)
@@ -651,7 +669,7 @@ end
 -- Collection Function
 function performCollection(unitID, unitData)
   local resourceNeed = assessResourceNeeds()
-  if resourceNeed ~= "none" then
+  if resourceNeed ~= "full" then
       local x, y, z = spGetUnitPosition(unitID)
       local featureID = findReclaimableFeature(unitID, x, z, reclaimRadius, resourceNeed)
       if featureID and Spring.ValidFeatureID(featureID) then
@@ -693,57 +711,7 @@ end
 
 
 
--- ///////////////////////////////////////////  processUnits Function
-function processUnits(units)
-  for unitID, unitData in pairs(units) do
-      local unitDefID = spGetUnitDefID(unitID)
-      if unitDefID == armRectrDefID or unitDefID == corNecroDefID then
 
-              -- Check if unit is valid and exists
-      if not Spring.ValidUnitID(unitID) or Spring.GetUnitIsDead(unitID) then
-        return -- Skip invalid or dead units
-    end
-
-    -- Skip if the unit is currently engaged in a task
-    if unitData.taskStatus == "in_progress" then
-        return
-    end
-
-    -- Check if the unit is fully built
-    local _, _, _, _, buildProgress = Spring.GetUnitHealth(unitID)
-    if buildProgress < 1 then
-        -- Skip this unit as it's still being built
-        return
-    end
-
-          -- Avoid enemies if necessary
-          local nearestEnemy, distance = findNearestEnemy(unitID, enemyAvoidanceRadius)
-          if nearestEnemy and distance < enemyAvoidanceRadius then
-              avoidEnemy(unitID, nearestEnemy)
-              unitData.taskType = "avoidingEnemy"
-              unitData.taskStatus = "in_progress"
-              return
-          end
-
-          -- Resurrecting Logic
-          if checkboxes.resurrecting.state then
-              performResurrection(unitID, unitData)
-              if resurrectingUnits[unitID] then return end
-          end
-
-          -- Collecting Logic
-          if checkboxes.collecting.state then
-              local featureCollected = performCollection(unitID, unitData)
-              if featureCollected then return end
-          end
-
-          -- Healing Logic
-          if checkboxes.healing.state then
-              performHealing(unitID, unitData)
-          end
-      end
-  end
-end
 
 
 
@@ -800,30 +768,19 @@ end
 
 
 
--- ///////////////////////////////////////////  checkAndRetreatIfNeeded Function
-function checkAndRetreatIfNeeded(unitID, retreatRadius)
-  local unitDefID = spGetUnitDefID(unitID)
-  local nearestEnemy, distance = findNearestEnemy(unitID, retreatRadius)
-
-  -- Only execute retreat logic if the unit is a rezbot
-  if unitDefID == armRectrDefID or unitDefID == corNecroDefID then
-    if nearestEnemy and distance < retreatRadius then
-      -- Issue the move order only if the unit should retreat
-      avoidEnemy(unitID, nearestEnemy, distance)
-    end
-  end
-end
-
-
-
 
 
 -- ///////////////////////////////////////////  UnitIdle Function
 function widget:UnitIdle(unitID)
   local unitDefID = spGetUnitDefID(unitID)
   if not unitDefID then return end  -- Check if unitDefID is valid
+
+  -- Get the unit definition using unitDefID
   local unitDef = UnitDefs[unitDefID]
-  if not unitDef then return end  -- Check if unitDef is valid
+  if not unitDef then return end -- Check if the unitDef is valid
+
+  -- Check if the unit is a Resbot
+  if not isMyResbot(unitID, unitDefID) then return end
 
   -- Initialize unitData if it does not exist for this unit
   local unitData = unitsToCollect[unitID]
@@ -835,7 +792,6 @@ function widget:UnitIdle(unitID)
           featureID = nil  -- Make sure to initialize all fields that will be used
       }
       unitsToCollect[unitID] = unitData
-      -- Spring.Echo("UnitIdle: Initialized unitsToCollect entry for unitID:", unitID)
   else
       unitData.taskStatus = "idle"
   end
@@ -856,7 +812,6 @@ function widget:UnitIdle(unitID)
       unitData.featureID = nil  -- Reset featureID since the unit is idle now
   end
 
-  -- Clean up any state related to healing, resurrecting, or collecting
   if healingUnits[unitID] then
       local healedUnitID = healingUnits[unitID]
       healingTargets[healedUnitID] = (healingTargets[healedUnitID] or 0) - 1
@@ -869,9 +824,9 @@ function widget:UnitIdle(unitID)
   if resurrectingUnits[unitID] then
       resurrectingUnits[unitID] = nil
   end
-
-  -- Additional cleanup or re-queue logic can go here, if needed
 end
+
+
 
 
 
