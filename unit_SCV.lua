@@ -5,7 +5,7 @@ function widget:GetInfo()
     desc      = "RezBots Resurrect, Collect resources, and heal injured units. alt+c to open UI",
     author    = "Tumeden",
     date      = "2024",
-    version   = "v1.06",
+    version   = "v1.07",
     license   = "GNU GPL, v2 or later",
     layer     = 0,
     enabled   = true
@@ -373,6 +373,7 @@ function isBuilding(unitID)
   return unitDef.isBuilding or unitDef.isImmobile or false
 end
 
+
 -- ///////////////////////////////////////////  processUnits Function
 function processUnits(units)
   for unitID, unitData in pairs(units) do
@@ -594,24 +595,23 @@ end
 
 
 -- ///////////////////////////////////////////  assessResourceNeeds Function
-function assessResourceNeeds(unitID, unitData)
+function assessResourceNeeds()
   local myTeamID = Spring.GetMyTeamID()
   local currentMetal, storageMetal = Spring.GetTeamResources(myTeamID, "metal")
   local currentEnergy, storageEnergy = Spring.GetTeamResources(myTeamID, "energy")
 
-  local metalFull = currentMetal >= storageMetal * 0.75  -- 75% full
-  local energyFull = currentEnergy >= storageEnergy * 0.75  -- 75% full
+  local metalRatio = currentMetal / storageMetal
+  local energyRatio = currentEnergy / storageEnergy
 
-  if metalFull and energyFull then
-    return "full"
-  elseif metalFull then
-    return "metal" -- Changed from "energy" to "metal" if metal storage is full
-  elseif energyFull then
-    return "energy" -- Changed from "metal" to "energy" if energy storage is full
+  if metalRatio >= 0.75 and energyRatio >= 0.75 then
+      return "full"
+  elseif metalRatio < energyRatio then
+      return "metal"
   else
-    return nil
+      return "energy"
   end
 end
+
 
 
 
@@ -628,16 +628,16 @@ function calculateResourceScore(featureMetal, featureEnergy, distance, resourceN
   local weightDistance = 1  -- Base weight for distance
   local penaltyNotNeeded = 10000  -- Large penalty if the resource is not needed
 
-  -- Calculate base score using distance
   local score = distance * weightDistance
-
-  -- Add penalty if the resource is not needed
-  if (resourceNeed == "metal" and featureMetal <= 0) or (resourceNeed == "energy" and featureEnergy <= 0) then
+  if resourceNeed == "metal" and featureMetal <= 0 then
+      score = score + penaltyNotNeeded
+  elseif resourceNeed == "energy" and featureEnergy <= 0 then
       score = score + penaltyNotNeeded
   end
 
   return score
 end
+
 
 
 
@@ -851,7 +851,7 @@ end
 
 -- ///////////////////////////////////////////  isUnitStuck Function
 local lastStuckCheck = {}
-local checkInterval = 1000  -- Number of game frames to wait between checks
+local checkInterval = 500  -- Number of game frames to wait between checks
 
 function isUnitStuck(unitID)
   local currentFrame = Spring.GetGameFrame()
