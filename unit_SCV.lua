@@ -5,7 +5,7 @@ function widget:GetInfo()
     desc      = "RezBots Resurrect, Collect resources, and heal injured units. alt+c to open UI",
     author    = "Tumeden",
     date      = "2024",
-    version   = "v1.09",
+    version   = "v1.10",
     license   = "GNU GPL, v2 or later",
     layer     = 0,
     enabled   = true
@@ -105,8 +105,7 @@ local checkboxes = {
   healing = { x = windowPos.x + 30, y = windowPos.y + 50, size = 20, state = false, label = "Healing" },
   resurrecting = { x = windowPos.x + 30, y = windowPos.y + 80, size = 20, state = false, label = "Resurrect" },
   collecting = { x = windowPos.x + 30, y = windowPos.y + 110, size = 20, state = false, label = "Resource Collection" },
-  excludeBuildings = { x = windowPos.x + 30, y = windowPos.y + 140, size = 20, state = false, label = "Exclude Buildings" },
-  
+  excludeBuildings = { x = windowPos.x + 30, y = windowPos.y + 140, size = 20, state = false, label = "Exclude buildings from Resurrection" },
 }
 
 local sliders = {
@@ -192,7 +191,7 @@ local mainBoxY = (vsy + mainBoxHeight) / 2
 
       -- Draw the slider knob in green
       gl.Color(0, 1, 0, 1) -- Green color for knob
-      gl.Rect(knobX - 5, slider.y - 5, knobX + 5, slider.y + 15) -- Adjust knob size as needed
+      gl.Rect(knobX - 8, slider.y - 5, knobX + 5, slider.y + 15) -- Adjust knob size as needed
 
       -- Draw the current value of the slider in green
       local valueText = string.format("%.1f", slider.value)  -- Format the value to one decimal place
@@ -209,24 +208,26 @@ local mainBoxY = (vsy + mainBoxHeight) / 2
 
     -- Draw checkboxes
     for _, box in pairs(checkboxes) do
-      gl.Color(1, 1, 1, 1) -- White color for box
-      gl.Rect(box.x, box.y, box.x + box.size, box.y + box.size)
       if box.state then
-        gl.Color(0, 1, 0, 1) -- Green color for tick
+        -- Fill the checkbox with green color when checked
+        gl.Color(0, 1, 0, 1) -- Green color for checked box
+        gl.Rect(box.x, box.y, box.x + box.size, box.y + box.size)
+        -- Optional: Draw a check mark or any symbol you prefer over the filled box
+        gl.Color(1, 1, 1, 1) -- White color for the check mark
         gl.LineWidth(2)
         glBeginEnd(GL.LINES, function()
           glVertex(box.x + 3, box.y + box.size - 3)
           glVertex(box.x + box.size - 3, box.y + 3)
         end)
         gl.LineWidth(1)
-        
-        -- Change label color to green for enabled checkboxes
-        gl.Color(0, 1, 0, 1) -- Green color for text
       else
-        -- Default label color for disabled checkboxes (white)
-        gl.Color(1, 1, 1, 1) -- White color for text
+        -- Draw an unfilled box with white border for unchecked state
+        gl.Color(1, 1, 1, 1) -- White color for box border
+        gl.Rect(box.x, box.y, box.x + box.size, box.y + box.size)
       end
       
+      -- Label color remains the same for both checked and unchecked states
+      gl.Color(1, 1, 1, 1) -- White color for text
       gl.Text(box.label, box.x + box.size + 10, box.y, 12)
     end
   end
@@ -940,7 +941,7 @@ end
 
 
 
--- Resurrection Function
+-- Resurrection Function with Maximum Units Per Feature Check
 function performResurrection(unitID, unitData)
   local resurrectableFeatures = resurrectNearbyDeadUnits(unitID, healResurrectRadius)
   if #resurrectableFeatures > 0 then
@@ -951,11 +952,15 @@ function performResurrection(unitID, unitData)
           -- Exclude buildings if checkbox is checked
           if not (checkboxes.excludeBuildings.state and isBuilding(featureID)) then
               if feature.customParams["category"] == "corpses" then
-                  if Spring.ValidFeatureID(featureID) then
+                  -- Check if the feature is not targeted by too many units
+                  if Spring.ValidFeatureID(featureID) and (not targetedFeatures[featureID] or targetedFeatures[featureID] < maxUnitsPerFeature) then
                       spGiveOrderToUnit(unitID, CMD.RESURRECT, {featureID + Game.maxUnits}, {})
                       unitData.taskType = "resurrecting"
                       unitData.taskStatus = "in_progress"
                       resurrectingUnits[unitID] = true
+                      
+                      -- Increment the counter for this feature
+                      targetedFeatures[featureID] = (targetedFeatures[featureID] or 0) + 1
                       return -- Exit after issuing the first valid order
                   end
               end
@@ -966,6 +971,7 @@ function performResurrection(unitID, unitData)
   -- No features to resurrect, mark as idle to reassign
   unitData.taskStatus = "idle"
 end
+
 
 
 
