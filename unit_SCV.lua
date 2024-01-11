@@ -5,7 +5,7 @@ function widget:GetInfo()
     desc      = "RezBots Resurrect, Collect resources, and heal injured units. alt+c to open UI",
     author    = "Tumeden",
     date      = "2024",
-    version   = "v1.08",
+    version   = "v1.09",
     license   = "GNU GPL, v2 or later",
     layer     = 0,
     enabled   = true
@@ -361,17 +361,235 @@ end
 end
 
 
--- Function to check if a unit is a building
-function isBuilding(unitID)
-  local unitDefID = Spring.GetUnitDefID(unitID)
-  if not unitDefID then return false end  -- Check if unitDefID is valid
 
-  local unitDef = UnitDefs[unitDefID]
-  if not unitDef then return false end  -- Check if unitDef is valid
+-- A table to check if a unit definition name corresponds to a building
+-- This was necessary because Dead units and dead buildings are all considered 'corpses,heaps'
+-- There is no way to differentiate between a dead unit and dead building without referencing their name.
+local buildingNames = {
+  armamb = true,
+  armamd = true,
+  armanni = true,
+  armbeamer = true,
+  armbrtha = true,
+  armcir = true,
+  armclaw = true,
+  armemp = true,
+  armferret = true,
+  armflak = true,
+  armguard = true,
+  armhlt = true,
+  armjuno = true,
+  armllt = true,
+  armmercury = true,
+  armpb = true,
+  armrl = true,
+  armshockwave = true,
+  armsilo = true,
+  armvulc = true,
+  corbhmth = true,
+  corbuzz = true,
+  cordoom = true,
+  corerad = true,
+  corexp = true,
+  corflak = true,
+  corfmd = true,
+  corhllt = true,
+  corhlt = true,
+  corint = true,
+  corjuno = true,
+  corllt = true,
+  cormadsam = true,
+  cormaw = true,
+  cormexp = true,
+  corpun = true,
+  corrl = true,
+  corscreamer = true,
+  corsilo = true,
+  cortoast = true,
+  cortron = true,
+  corvipe = true,
+  armadvsol = true,
+  armafus = true,
+  armageo = true,
+  armamex = true,
+  armckfus = true,
+  armestor = true,
+  armfus = true,
+  armgeo = true,
+  armgmm = true,
+  armmakr = true,
+  armmex = true,
+  armmmkr = true,
+  armmoho = true,
+  armmstor = true,
+  armsolar = true,
+  armwin = true,
+  coradvsol = true,
+  corafus = true,
+  corageo = true,
+  corestor = true,
+  corfus = true,
+  corgeo = true,
+  cormakr = true,
+  cormex = true,
+  cormmkr = true,
+  cormoho = true,
+  cormstor = true,
+  corsolar = true,
+  corwin = true,
+  armaap = true,
+  armalab = true,
+  armap = true,
+  armavp = true,
+  armhp = true,
+  armlab = true,
+  armshltx = true,
+  armvp = true,
+  coraap = true,
+  coralab = true,
+  corap = true,
+  coravp = true,
+  corgant = true,
+  corhp = true,
+  corlab = true,
+  corvp = true,
+  armarad = true,
+  armasp = true,
+  armdf = true,
+  armdrag = true,
+  armeyes = true,
+  armfort = true,
+  armgate = true,
+  armjamt = true,
+  armmine1 = true,
+  armmine2 = true,
+  armmine3 = true,
+  armnanotc = true,
+  armnanotct2 = true,
+  armrad = true,
+  armsd = true,
+  armtarg = true,
+  armveil = true,
+  corarad = true,
+  corasp = true,
+  cordrag = true,
+  coreyes = true,
+  corfort = true,
+  corgate = true,
+  corjamt = true,
+  cormine1 = true,
+  cormine2 = true,
+  cormine3 = true,
+  cormine4 = true,
+  cornanotc = true,
+  cornanotct2 = true,
+  corrad = true,
+  corsd = true,
+  corshroud = true,
+  cortarg = true,
+  armatl = true,
+  armdl = true,
+  armfflak = true,
+  armfhlt = true,
+  armfrock = true,
+  armfrt = true,
+  armgplat = true,
+  armkraken = true,
+  armptl = true,
+  armtl = true,
+  coratl = true,
+  cordl = true,
+  corenaa = true,
+  corfdoom = true,
+  corfhlt = true,
+  corfrock = true,
+  corfrt = true,
+  corgplat = true,
+  corptl = true,
+  cortl = true,
+  armfmkr = true,
+  armtide = true,
+  armuwadves = true,
+  armuwadvms = true,
+  armuwageo = true,
+  armuwes = true,
+  armuwfus = true,
+  armuwgeo = true,
+  armuwmex = true,
+  armuwmme = true,
+  armuwmmm = true,
+  armuwms = true,
+  corfmkr = true,
+  cortide = true,
+  coruwadves = true,
+  coruwadvms = true,
+  coruwageo = true,
+  coruwes = true,
+  coruwfus = true,
+  coruwgeo = true,
+  coruwmex = true,
+  coruwmme = true,
+  coruwmmm = true,
+  coruwms = true,
+  armamsub = true,
+  armasy = true,
+  armfhp = true,
+  armplat = true,
+  armshltxuw = true,
+  armsy = true,
+  coramsub = true,
+  corasy = true,
+  corfhp = true,
+  corgantuw = true,
+  corplat = true,
+  corsy = true,
+  armason = true,
+  armfasp = true,
+  armfatf = true,
+  armfdrag = true,
+  armfgate = true,
+  armfmine3 = true,
+  armfrad = true,
+  armnanotcplat = true,
+  armsonar = true,
+  corason = true,
+  corfasp = true,
+  corfatf = true,
+  corfdrag = true,
+  corfgate = true,
+  corfmine3 = true,
+  corfrad = true,
+  cornanotcplat = true,
+  corsonar = true,
+  -- Add more building names as needed
+}
 
-  -- Check if the unit is a building
-  return unitDef.isBuilding or unitDef.isImmobile or false
+-- Function to check if a unit or feature is a building or building wreckage
+function isBuilding(id)
+  -- First, check if it's a unit and a building based on unit definition name
+  local unitDefID = spGetUnitDefID(id)
+  if unitDefID then
+      local unitDef = UnitDefs[unitDefID]
+      if unitDef and buildingNames[unitDef.name] then
+          return true
+      end
+  end
+
+  -- If not a unit, check if it's a feature and a building wreckage
+  local featureDefID = spGetFeatureDefID(id)
+  if featureDefID then
+      local featureDef = FeatureDefs[featureDefID]
+      -- Check if the feature is reclaimable and has the 'fromunit' custom parameter
+      if featureDef and featureDef.reclaimable and featureDef.customParams and featureDef.customParams.fromunit then
+          -- Use the 'fromunit' parameter to check against the building names
+          return buildingNames[featureDef.customParams.fromunit] == true
+      end
+  end
+
+  return false -- Not a building or building wreckage
 end
+
+
 
 
 -- ///////////////////////////////////////////  processUnits Function
@@ -707,20 +925,18 @@ function performCollection(unitID, unitData)
       local x, y, z = spGetUnitPosition(unitID)
       local featureID = findReclaimableFeature(unitID, x, z, reclaimRadius, resourceNeed)
       if featureID and Spring.ValidFeatureID(featureID) then
-          -- Exclude buildings if checkbox is checked
-          if not (checkboxes.excludeBuildings.state and isBuilding(featureID)) then
-              spGiveOrderToUnit(unitID, CMD_RECLAIM, {featureID + Game.maxUnits}, {})
-              unitData.featureCount = 1
-              unitData.lastReclaimedFrame = Spring.GetGameFrame()
-              targetedFeatures[featureID] = (targetedFeatures[featureID] or 0) + 1
-              unitData.taskType = "reclaiming"
-              unitData.taskStatus = "in_progress"
-              return true
-          end
+          spGiveOrderToUnit(unitID, CMD_RECLAIM, {featureID + Game.maxUnits}, {})
+          unitData.featureCount = 1
+          unitData.lastReclaimedFrame = Spring.GetGameFrame()
+          targetedFeatures[featureID] = (targetedFeatures[featureID] or 0) + 1
+          unitData.taskType = "reclaiming"
+          unitData.taskStatus = "in_progress"
+          return true
       end
   end
   return false
 end
+
 
 
 
