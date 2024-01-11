@@ -5,7 +5,7 @@ function widget:GetInfo()
     desc      = "RezBots Resurrect, Collect resources, and heal injured units. alt+c to open UI",
     author    = "Tumeden",
     date      = "2024",
-    version   = "v1.11",
+    version   = "v1.12",
     license   = "GNU GPL, v2 or later",
     layer     = 0,
     enabled   = true
@@ -635,7 +635,7 @@ end
 
 
 
--- ///////////////////////////////////////////  UnitDestroyed Function
+-- ///////////////////////////////////////////  FeatureDestroyed Function
 function widget:FeatureDestroyed(featureID, allyTeam)
   for unitID, data in pairs(unitsToCollect) do
     local unitDefID = spGetUnitDefID(unitID)
@@ -643,7 +643,7 @@ function widget:FeatureDestroyed(featureID, allyTeam)
       if data.featureID == featureID then
         data.featureID = nil
         data.lastReclaimedFrame = Spring.GetGameFrame()
-        data.taskStatus = "completed"  -- Marking the task as completed
+        data.taskStatus = "idle"  -- reset the unit to idle after unit destroyed.
         processUnits(unitsToCollect)
         break
       end
@@ -652,21 +652,6 @@ function widget:FeatureDestroyed(featureID, allyTeam)
   targetedFeatures[featureID] = nil  -- Clear the target as the feature is destroyed
 end
 
-
-
--- ///////////////////////////////////////////  FeatureDestroyed Function
-function widget:FeatureDestroyed(featureID, allyTeam)
-  for unitID, data in pairs(unitsToCollect) do
-    if data.featureID == featureID then
-      data.featureID = nil
-      data.lastReclaimedFrame = Spring.GetGameFrame()
-      data.taskStatus = "completed"  -- Marking the task as completed
-      processUnits(unitsToCollect)
-      break
-    end
-  end
-  targetedFeatures[featureID] = nil  -- Clear the target as the feature is destroyed
-end
 
 
 
