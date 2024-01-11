@@ -5,7 +5,7 @@ function widget:GetInfo()
     desc      = "RezBots Resurrect, Collect resources, and heal injured units. alt+c to open UI",
     author    = "Tumeden",
     date      = "2024",
-    version   = "v1.10",
+    version   = "v1.11",
     license   = "GNU GPL, v2 or later",
     layer     = 0,
     enabled   = true
@@ -625,11 +625,13 @@ function widget:UnitCreated(unitID, unitDefID, unitTeam)
   if isMyResbot(unitID, unitDefID) then  -- Use isMyResbot to check if the unit is a Resbot
     unitsToCollect[unitID] = {
       featureCount = 0,
-      lastReclaimedFrame = 0
+      lastReclaimedFrame = 0,
+      taskStatus = "idle"  -- Set the task status to "idle" when the unit is created
     }
     processUnits({[unitID] = unitsToCollect[unitID]})
   end
 end
+
 
 
 
@@ -814,8 +816,12 @@ function maintainSafeDistanceFromEnemy(unitID, avoidanceRadius)
           return true -- Indicate that the unit is avoiding an enemy
       end
   else
+
       -- If no enemy is near, remove the unit from tracking
       unitsMovingToSafety[unitID] = nil
+      if unitData then
+          unitData.taskStatus = "idle"  -- Set to idle if no enemy threat and not moving to safety
+      end
       return false -- No enemy avoidance needed
   end
 end
@@ -935,6 +941,8 @@ function performCollection(unitID, unitData)
           return true
       end
   end
+  -- Explicitly mark the unit as idle when no active task is found
+  unitData.taskStatus = "idle"
   return false
 end
 
