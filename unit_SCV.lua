@@ -5,7 +5,7 @@ function widget:GetInfo()
     desc      = "RezBots Resurrect, Collect resources, and heal injured units. alt+c to open UI",
     author    = "Tumeden",
     date      = "2024",
-    version   = "v1.15",
+    version   = "v1.16",
     license   = "GNU GPL, v2 or later",
     layer     = 0,
     enabled   = true
@@ -29,8 +29,8 @@ local unitsToCollect = {}  -- table to keep track of units and their collection 
 local healingUnits = {}  -- table to keep track of healing units
 local unitLastPosition = {} -- Track the last position of each unit
 local targetedFeatures = {}  -- Table to keep track of targeted features
-local maxUnitsPerFeature = 4  -- Maximum units allowed to target the same feature
 local healingTargets = {}  -- Track which units are being healed and by how many healers
+local maxUnitsPerFeature = 4  -- Maximum units allowed to target the same feature
 local maxHealersPerUnit = 4  -- Maximum number of healers per unit
 local healResurrectRadius = 1000 -- Set your desired heal/resurrect radius here  (default 1000)
 local reclaimRadius = 1500 -- Set your desired reclaim radius here (any number works, 4000 is about half a large map)
@@ -46,13 +46,8 @@ local spGetUnitPosition = Spring.GetUnitPosition
 local spGetFeaturesInCylinder = Spring.GetFeaturesInCylinder
 local spGetFeatureDefID = Spring.GetFeatureDefID
 local spGetMyTeamID = Spring.GetMyTeamID
-local spGetUnitHealth = Spring.GetUnitHealth
-local spGetUnitsInCylinder = Spring.GetUnitsInCylinder
-local spGetUnitIsDead = Spring.GetUnitIsDead
-local spValidUnitID = Spring.ValidUnitID
-local spGetTeamResources = Spring.GetTeamResources
 local spGetFeaturePosition = Spring.GetFeaturePosition
-local spGetUnitCommands = Spring.GetUnitCommands
+
 
 -- Command Definitions
 local CMD_MOVE = CMD.MOVE
@@ -616,25 +611,35 @@ function processUnits(units)
   for unitID, unitData in pairs(units) do
       if isMyResbot(unitID, spGetUnitDefID(unitID)) then  -- Use isMyResbot to check if the unit is a Resbot
 
+          -- Check for nearby damaged units and prioritize healing if found within 300 units
+          if checkboxes.healing.state and unitData.taskStatus ~= "in_progress" then
+              local nearestDamagedUnit, distance = findNearestDamagedFriendly(unitID, healResurrectRadius)
+              if nearestDamagedUnit and distance <= 300 then
+                  performHealing(unitID, unitData)
+                  if unitData.taskStatus == "in_progress" then return end  -- Skip other tasks if healing is in progress
+              end
+          end
+
           -- Resurrecting Logic
           if checkboxes.resurrecting.state and unitData.taskStatus ~= "in_progress" then
               performResurrection(unitID, unitData)
-              if resurrectingUnits[unitID] then return end
+              if resurrectingUnits[unitID] then return end  -- Skip other tasks if resurrecting is in progress
           end
 
           -- Collecting Logic
           if checkboxes.collecting.state and unitData.taskStatus ~= "in_progress" then
               local featureCollected = performCollection(unitID, unitData)
-              if featureCollected then return end
+              if featureCollected then return end  -- Skip other tasks if collecting is in progress
           end
 
-          -- Healing Logic
+          -- Healing Logic (if no damaged units are found within 500 units)
           if checkboxes.healing.state and unitData.taskStatus ~= "in_progress" then
               performHealing(unitID, unitData)
           end
       end
   end
 end
+
 
 
 
@@ -793,43 +798,47 @@ end
 
 
 -- ///////////////////////////////////////////  maintainSafeDistanceFromEnemy Function
-function maintainSafeDistanceFromEnemy(unitID, avoidanceRadius)
-  local nearestEnemy, distance, isAirUnit = findNearestEnemy(unitID, avoidanceRadius)
-  if nearestEnemy and distance < avoidanceRadius then
-      -- Reduce the avoidance radius for air units
-      local effectiveAvoidanceRadius = isAirUnit and (avoidanceRadius * 0.25) or avoidanceRadius
-
-      if distance < effectiveAvoidanceRadius then
-          local ux, uy, uz = spGetUnitPosition(unitID)
-          local ex, ey, ez = spGetUnitPosition(nearestEnemy)
-
-          -- Calculate a direction vector away from the enemy
-          local dx, dz = ux - ex, uz - ez
-          local magnitude = math.sqrt(dx * dx + dz * dz)
-
-          -- Calculate a safe destination
-          local safeDistance = effectiveAvoidanceRadius
-          local safeX = ux + (dx / magnitude * safeDistance)
-          local safeZ = uz + (dz / magnitude * safeDistance)
-          local safeY = Spring.GetGroundHeight(safeX, safeZ)
-
-          -- Issue a move order to the safe destination
-          spGiveOrderToUnit(unitID, CMD.MOVE, {safeX, safeY, safeZ}, {})
-          
-          -- Track the unit as moving to safety
-          unitsMovingToSafety[unitID] = true
-          return true -- Indicate that the unit is avoiding an enemy
-      end
-  else
-
-      -- If no enemy is near, remove the unit from tracking
-      unitsMovingToSafety[unitID] = nil
-      if unitData then
-          unitData.taskStatus = "idle"  -- Set to idle if no enemy threat and not moving to safety
-      end
-      return false -- No enemy avoidance needed
+-- Updated maintainSafeDistanceFromEnemy function
+  function maintainSafeDistanceFromEnemy(unitID, defaultAvoidanceRadius)
+    local nearestEnemy, distance, isAirUnit = findNearestEnemy(unitID, defaultAvoidanceRadius)
+    local nearestDamagedUnit, distanceToDamagedUnit = findNearestDamagedFriendly(unitID, 500)
+  
+    -- Determine the safe distance
+    local safeDistance = defaultAvoidanceRadius
+    if nearestDamagedUnit and distanceToDamagedUnit <= 500 then
+        safeDistance = safeDistance * 0.5 -- Reduce the safe distance by half when near damaged units
+    end
+  
+    if nearestEnemy and distance < safeDistance then
+        local ux, uy, uz = spGetUnitPosition(unitID)
+        local ex, ey, ez = spGetUnitPosition(nearestEnemy)
+  
+        -- Calculate a direction vector away from the enemy
+        local dx, dz = ux - ex, uz - ez
+        local magnitude = math.sqrt(dx * dx + dz * dz)
+  
+        -- Calculate a safe destination
+        local adjustedSafeDistance = isAirUnit and (safeDistance * 0.25) or safeDistance
+        local safeX = ux + (dx / magnitude * adjustedSafeDistance)
+        local safeZ = uz + (dz / magnitude * adjustedSafeDistance)
+        local safeY = Spring.GetGroundHeight(safeX, safeZ)
+  
+        -- Issue a move order to the safe destination
+        spGiveOrderToUnit(unitID, CMD.MOVE, {safeX, safeY, safeZ}, {})
+        
+        -- Track the unit as moving to safety
+        unitsMovingToSafety[unitID] = true
+        return true -- Indicate that the unit is avoiding an enemy
+    else
+        -- If no enemy is near, remove the unit from tracking
+        unitsMovingToSafety[unitID] = nil
+        if unitData then
+            unitData.taskStatus = "idle"  -- Set to idle if no enemy threat and not moving to safety
+        end
+        return false -- No enemy avoidance needed
+    end
   end
-end
+  
 
 
 
