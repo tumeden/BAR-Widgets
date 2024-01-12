@@ -5,7 +5,7 @@ function widget:GetInfo()
     desc      = "RezBots Resurrect, Collect resources, and heal injured units. alt+c to open UI",
     author    = "Tumeden",
     date      = "2024",
-    version   = "v1.12",
+    version   = "v1.13",
     license   = "GNU GPL, v2 or later",
     layer     = 0,
     enabled   = true
@@ -22,6 +22,7 @@ end
 
 -- /////////////////////////////////////////// Important things :))
 local widgetEnabled = true
+local isLoggingEnabled = false
 local unitsMovingToSafety = {}
 local resurrectingUnits = {}  -- table to keep track of units currently resurrecting
 local unitsToCollect = {}  -- table to keep track of units and their collection state
@@ -84,7 +85,15 @@ local glVertex = gl.Vertex
 local glBeginEnd = gl.BeginEnd
 
 
-
+-- /////////////////////////////////////////// scvlog Function
+-- CTRL + L to enable Logging
+-- This is for development purposes.
+local function scvlog(...)
+  if isLoggingEnabled then
+      Spring.Echo(...)
+  end
+end
+--
 
 
 -- /////////////////////////////////////////// -- /////////////////////////////////////////// --
@@ -92,6 +101,7 @@ local glBeginEnd = gl.BeginEnd
 -- ////////////////////////////////////////- UI CODE -////////////////////////////////////// --
 -- /////////////////////////////////////////// -- /////////////////////////////////////////// --
 -- /////////////////////////////////////////// -- /////////////////////////////////////////// --
+
 
 
 -- /////////////////////////////////////////// UI Variables
@@ -128,6 +138,7 @@ end
 
 -- /////////////////////////////////////////// KeyPress Function Modification
 local ESCAPE_KEY = 27 -- Escape key is usually 27 in ASCII
+local L_KEY = 108 -- ASCII value for 'l'
 
 function widget:KeyPress(key, mods, isRepeat)
     if key == 0x0063 and mods.alt then -- Alt+C to toggle UI
@@ -140,8 +151,16 @@ function widget:KeyPress(key, mods, isRepeat)
         return true
     end
 
+    -- Ctrl+L to toggle logging
+    if key == L_KEY and mods.ctrl then
+        isLoggingEnabled = not isLoggingEnabled
+        Spring.Echo("SCV Logging " .. (isLoggingEnabled and "Enabled" or "Disabled"))
+        return true
+    end
+
     return false
 end
+
 
 
 
@@ -334,10 +353,9 @@ function widget:Initialize()
       widgetHandler:RemoveWidget()
       return
   end
-
-  -- You can add any additional initialization code here if needed
-
 end
+
+
 -- ///////////////////////////////////////////  isMyResbot Function 
 -- Updated isMyResbot function
   function isMyResbot(unitID, unitDefID)
@@ -623,6 +641,7 @@ end
 -- ///////////////////////////////////////////  UnitCreated Function
 function widget:UnitCreated(unitID, unitDefID, unitTeam)
   if isMyResbot(unitID, unitDefID) then  -- Use isMyResbot to check if the unit is a Resbot
+    scvlog("Resbot created: UnitID = " .. unitID)
     unitsToCollect[unitID] = {
       featureCount = 0,
       lastReclaimedFrame = 0,
@@ -637,6 +656,7 @@ end
 
 -- ///////////////////////////////////////////  FeatureDestroyed Function
 function widget:FeatureDestroyed(featureID, allyTeam)
+  scvlog("Feature destroyed: FeatureID = " .. featureID)
   for unitID, data in pairs(unitsToCollect) do
     local unitDefID = spGetUnitDefID(unitID)
     if isMyResbot(unitID, unitDefID) then  -- Use isMyResbot to check if the unit is a Resbot
@@ -865,22 +885,28 @@ end
 -- /////////////////////////////////////////// findReclaimableFeature Function
 function findReclaimableFeature(unitID, x, z, searchRadius, resourceNeed)
   local featuresInRadius = spGetFeaturesInCylinder(x, z, searchRadius)
+  if not featuresInRadius then
+    scvlog("No features found in the search radius for unit", unitID)
+    return nil
+  end
+
   local bestFeature = nil
   local bestScore = math.huge
 
   for _, featureID in ipairs(featuresInRadius) do
       local featureDefID = spGetFeatureDefID(featureID)
-      local featureDef = FeatureDefs[featureDefID]
-      local featureMetal, featureEnergy = getFeatureResources(featureID)
+      if featureDefID then
+          local featureDef = FeatureDefs[featureDefID]
+          if featureDef and featureDef.reclaimable then
+              local featureX, _, featureZ = Spring.GetFeaturePosition(featureID)
+              local distanceToFeature = ((featureX - x)^2 + (featureZ - z)^2)^0.5
+              local featureMetal, featureEnergy = getFeatureResources(featureID)
+              local score = calculateResourceScore(featureMetal, featureEnergy, distanceToFeature, resourceNeed)
 
-      if featureDef and featureDef.reclaimable then
-          local featureX, _, featureZ = Spring.GetFeaturePosition(featureID)
-          local distanceToFeature = ((featureX - x)^2 + (featureZ - z)^2)^0.5
-          local score = calculateResourceScore(featureMetal, featureEnergy, distanceToFeature, resourceNeed)
-
-          if score < bestScore and (not targetedFeatures[featureID] or targetedFeatures[featureID] < maxUnitsPerFeature) then
-              bestScore = score
-              bestFeature = featureID
+              if score < bestScore and (not targetedFeatures[featureID] or targetedFeatures[featureID] < maxUnitsPerFeature) then
+                  bestScore = score
+                  bestFeature = featureID
+              end
           end
       end
   end
@@ -890,33 +916,53 @@ end
 
 
 
--- Healing Function
+
+-- Healing Function with Enhanced Logging
 function performHealing(unitID, unitData)
+  scvlog("Attempting to heal with unit:", unitID)
+  
   local nearestDamagedUnit, distance = findNearestDamagedFriendly(unitID, healResurrectRadius)
+
   if nearestDamagedUnit and distance < healResurrectRadius then
+      scvlog("Nearest damaged unit found for healing by unit", unitID, "is unit", nearestDamagedUnit, "at distance", distance)
+
       healingTargets[nearestDamagedUnit] = healingTargets[nearestDamagedUnit] or 0
+      
       if healingTargets[nearestDamagedUnit] < maxHealersPerUnit and not healingUnits[unitID] then
+          scvlog("Unit", unitID, "is healing unit", nearestDamagedUnit)
           Spring.GiveOrderToUnit(unitID, CMD.REPAIR, {nearestDamagedUnit}, {})
           healingUnits[unitID] = nearestDamagedUnit
           healingTargets[nearestDamagedUnit] = healingTargets[nearestDamagedUnit] + 1
           unitData.taskType = "healing"
           unitData.taskStatus = "in_progress"
-        else
-          -- Explicitly mark the unit as idle if no damaged unit is found
+      else
+          scvlog("Healing target already has maximum healers or unit", unitID, "is already assigned to healing")
+          -- Explicitly mark the unit as idle if no damaged unit is found or if the unit is already healing
           unitData.taskStatus = "idle"
       end
+  else
+      scvlog("No damaged friendly unit found within range for unit", unitID)
+      -- Explicitly mark the unit as idle if no damaged unit is found
+      unitData.taskStatus = "idle"
   end
 end
 
 
 
--- Collection Function
+
+-- Collection Function with Enhanced Logging
 function performCollection(unitID, unitData)
+  scvlog("Attempting to collect with unit:", unitID)
   local resourceNeed = assessResourceNeeds()
+
+  scvlog("Resource need status:", resourceNeed)
+
   if resourceNeed ~= "full" then
       local x, y, z = spGetUnitPosition(unitID)
       local featureID = findReclaimableFeature(unitID, x, z, reclaimRadius, resourceNeed)
+
       if featureID and Spring.ValidFeatureID(featureID) then
+          scvlog("Unit", unitID, "is reclaiming feature", featureID)
           spGiveOrderToUnit(unitID, CMD_RECLAIM, {featureID + Game.maxUnits}, {})
           unitData.featureCount = 1
           unitData.lastReclaimedFrame = Spring.GetGameFrame()
@@ -924,52 +970,71 @@ function performCollection(unitID, unitData)
           unitData.taskType = "reclaiming"
           unitData.taskStatus = "in_progress"
           return true
+      else
+          scvlog("No valid feature found for collection by unit", unitID)
       end
+  else
+      scvlog("Resources are full, no collection required for unit", unitID)
   end
+
   -- Explicitly mark the unit as idle when no active task is found
   unitData.taskStatus = "idle"
+  scvlog("Unit", unitID, "marked as idle due to lack of collection tasks")
   return false
 end
 
 
 
 
+
 -- Resurrection Function with Maximum Units Per Feature Check
 function performResurrection(unitID, unitData)
+  scvlog("Attempting to resurrect with unit:", unitID)
   local resurrectableFeatures = resurrectNearbyDeadUnits(unitID, healResurrectRadius)
+
+  scvlog("Found " .. #resurrectableFeatures .. " resurrectable features for unit:", unitID)
+
   if #resurrectableFeatures > 0 then
       for i, featureID in ipairs(resurrectableFeatures) do
           local wreckageDefID = Spring.GetFeatureDefID(featureID)
           local feature = FeatureDefs[wreckageDefID]
 
-          -- Exclude buildings if checkbox is checked
           if not (checkboxes.excludeBuildings.state and isBuilding(featureID)) then
               if feature.customParams["category"] == "corpses" then
-                  -- Check if the feature is not targeted by too many units
                   if Spring.ValidFeatureID(featureID) and (not targetedFeatures[featureID] or targetedFeatures[featureID] < maxUnitsPerFeature) then
+                      scvlog("Unit", unitID, "is resurrecting feature", featureID)
                       spGiveOrderToUnit(unitID, CMD.RESURRECT, {featureID + Game.maxUnits}, {})
                       unitData.taskType = "resurrecting"
                       unitData.taskStatus = "in_progress"
                       resurrectingUnits[unitID] = true
                       
-                      -- Increment the counter for this feature
                       targetedFeatures[featureID] = (targetedFeatures[featureID] or 0) + 1
-                      return -- Exit after issuing the first valid order
+                      return  -- Exit after issuing the first valid order
+                  else
+                      scvlog("Feature", featureID, "is already targeted by maximum units or not valid")
                   end
+              else
+                  scvlog("Feature", featureID, "is not a corpse, skipping")
               end
+          else
+              scvlog("Feature", featureID, "is a building or building wreckage, excluded from resurrection")
           end
       end
+  else
+      scvlog("No resurrectable features found for unit:", unitID)
   end
 
   -- No features to resurrect, mark as idle to reassign
+  scvlog("No resurrection tasks available, setting unit", unitID, "to idle")
   unitData.taskStatus = "idle"
 end
 
 
 
 
+
 -- /////////////////////////////////////////// resurrectNearbyDeadUnits Function
-local maxFeaturesToConsider = 10 -- Maximum number of features to consider
+local maxFeaturesToConsider = 25 -- Maximum number of features to consider
 
 -- Function to resurrect nearby dead units, excluding buildings if specified
 function resurrectNearbyDeadUnits(unitID, healResurrectRadius)
@@ -1022,59 +1087,75 @@ end
 
 -- ///////////////////////////////////////////  UnitIdle Function
 function widget:UnitIdle(unitID)
+  scvlog("UnitIdle called for UnitID:", unitID)
+
   local unitDefID = spGetUnitDefID(unitID)
-  if not unitDefID then return end  -- Check if unitDefID is valid
-
-  -- Get the unit definition using unitDefID
-  local unitDef = UnitDefs[unitDefID]
-  if not unitDef then return end -- Check if the unitDef is valid
-
-  -- Check if the unit is a Resbot
-  if not isMyResbot(unitID, unitDefID) then return end
-
-  -- Initialize unitData if it does not exist for this unit
-  local unitData = unitsToCollect[unitID]
-  if not unitData then
-      unitData = {
-          featureCount = 0,
-          lastReclaimedFrame = 0,
-          taskStatus = "idle",
-          featureID = nil  -- Make sure to initialize all fields that will be used
-      }
-      unitsToCollect[unitID] = unitData
-  else
-      unitData.taskStatus = "idle"
+  if not unitDefID then
+    scvlog("Invalid unitDefID for UnitID:", unitID)
+    return
   end
 
-  -- Re-queue the unit for tasks based on the checkbox states
+  local unitDef = UnitDefs[unitDefID]
+  if not unitDef then
+    scvlog("Invalid unitDef for UnitID:", unitID)
+    return
+  end
+
+  if not isMyResbot(unitID, unitDefID) then -- If unit is not a resbot, don't continue.
+    -- Disabled log due to it being spammy, don't really need to see non filtered units.
+     -- scvlog("Unit is not a Resbot, UnitID:", unitID)
+    return
+  end
+  -- If unit is a resbot, and becomes Idle
+  scvlog("UnitIdle called for Resbot UnitID:", unitID)
+
+  local unitData = unitsToCollect[unitID]
+  if not unitData then
+    scvlog("Initializing unitData for new UnitID:", unitID)
+    unitData = {
+      featureCount = 0,
+      lastReclaimedFrame = 0,
+      taskStatus = "idle",
+      featureID = nil
+    }
+    unitsToCollect[unitID] = unitData
+  else
+    unitData.taskStatus = "idle"
+    scvlog("Setting taskStatus to idle for UnitID:", unitID)
+  end
+
   if (unitDef.canReclaim and checkboxes.collecting.state) or
      (unitDef.canResurrect and checkboxes.resurrecting.state) or
      (unitDef.canRepair and checkboxes.healing.state) then
-      processUnits({[unitID] = unitData})
+    scvlog("Re-queueing UnitID for tasks:", unitID)
+    processUnits({[unitID] = unitData})
   end
 
-  -- Manage targeted features and healing units
   if unitData.featureID then
-      targetedFeatures[unitData.featureID] = (targetedFeatures[unitData.featureID] or 0) - 1
-      if targetedFeatures[unitData.featureID] <= 0 then
-          targetedFeatures[unitData.featureID] = nil
-      end
-      unitData.featureID = nil  -- Reset featureID since the unit is idle now
+    scvlog("Handling targeted feature for UnitID:", unitID)
+    targetedFeatures[unitData.featureID] = (targetedFeatures[unitData.featureID] or 0) - 1
+    if targetedFeatures[unitData.featureID] <= 0 then
+      targetedFeatures[unitData.featureID] = nil
+    end
+    unitData.featureID = nil
   end
 
   if healingUnits[unitID] then
-      local healedUnitID = healingUnits[unitID]
-      healingTargets[healedUnitID] = (healingTargets[healedUnitID] or 0) - 1
-      if healingTargets[healedUnitID] <= 0 then
-          healingTargets[healedUnitID] = nil
-      end
-      healingUnits[unitID] = nil
+    scvlog("Handling healing unit for UnitID:", unitID)
+    local healedUnitID = healingUnits[unitID]
+    healingTargets[healedUnitID] = (healingTargets[healedUnitID] or 0) - 1
+    if healingTargets[healedUnitID] <= 0 then
+      healingTargets[healedUnitID] = nil
+    end
+    healingUnits[unitID] = nil
   end
 
   if resurrectingUnits[unitID] then
-      resurrectingUnits[unitID] = nil
+    scvlog("Clearing resurrecting unit for UnitID:", unitID)
+    resurrectingUnits[unitID] = nil
   end
 end
+
 
 
 
@@ -1085,6 +1166,7 @@ local checkInterval = 500  -- Number of game frames to wait between checks
 function isUnitStuck(unitID)
   local currentFrame = Spring.GetGameFrame()
   if lastStuckCheck[unitID] and (currentFrame - lastStuckCheck[unitID]) < checkInterval then
+    scvlog("Skipping stuck check for unit due to cooldown: UnitID = " .. unitID)
     return false  -- Skip check if within the cooldown period
   end
 
@@ -1095,8 +1177,16 @@ function isUnitStuck(unitID)
   local lastPos = unitLastPosition[unitID] or {x = x, y = y, z = z}
   local stuck = (math.abs(lastPos.x - x)^2 + math.abs(lastPos.z - z)^2) < minMoveDistance^2
   unitLastPosition[unitID] = {x = x, y = y, z = z}
+
+  if stuck then
+    scvlog("Unit is stuck: UnitID = " .. unitID)
+  else
+    scvlog("Unit is not stuck: UnitID = " .. unitID)
+  end
+
   return stuck
 end
+
 
 
 
@@ -1110,6 +1200,7 @@ function handleStuckUnits(unitID, unitDef)
 
   if isMyResbot(unitID, unitDefID) then  -- Use isMyResbot to check if the unit is a Resbot
     if isUnitStuck(unitID) then
+          scvlog("Unit is stuck. Reassigning task: UnitID = " .. unitID)
           -- Directly reassign task to the unit
           unitsToCollect[unitID] = {
               featureCount = 0,
@@ -1117,6 +1208,10 @@ function handleStuckUnits(unitID, unitDef)
               taskStatus = "idle"  -- Mark as idle so it can be reassigned
           }
           processUnits({[unitID] = unitsToCollect[unitID]})
+      else
+          scvlog("Unit is not stuck: UnitID = " .. unitID)
       end
+  else
+      scvlog("Unit is not a Resbot or UnitDef is not valid: UnitID = " .. unitID)
   end
 end
