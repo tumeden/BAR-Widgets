@@ -5,7 +5,7 @@ function widget:GetInfo()
     desc      = "RezBots Resurrect, Collect resources, and heal injured units. alt+c to open UI",
     author    = "Tumeden",
     date      = "2024",
-    version   = "v1.13",
+    version   = "v1.14",
     license   = "GNU GPL, v2 or later",
     layer     = 0,
     enabled   = true
@@ -864,20 +864,38 @@ end
 
 
 
+local mapX, mapZ = Game.mapSizeX, Game.mapSizeZ
+local mapDiagonal = math.sqrt(mapX^2 + mapZ^2)
+
+function getDynamicWeightDistance(mapDiagonal)
+  local baseWeight = 1.5  -- Base weight for small maps
+  local scalingFactor = 0.5  -- Determines how much the map size influences weightDistance
+  local maxMapDiagonal = 12000  -- Example: Diagonal of a large map for reference
+
+  -- Increase weightDistance for larger maps
+  local weightDistance = baseWeight + scalingFactor * (mapDiagonal / maxMapDiagonal)
+  return weightDistance
+end
+
+local dynamicWeightDistance = getDynamicWeightDistance(mapDiagonal)
+
 -- /////////////////////////////////////////// calculateResourceScore Function
 function calculateResourceScore(featureMetal, featureEnergy, distance, resourceNeed)
-  local weightDistance = 1  -- Base weight for distance
   local penaltyNotNeeded = 10000  -- Large penalty if the resource is not needed
 
-  local score = distance * weightDistance
+  local score = distance * dynamicWeightDistance  -- Using dynamic weight
   if resourceNeed == "metal" and featureMetal <= 0 then
       score = score + penaltyNotNeeded
   elseif resourceNeed == "energy" and featureEnergy <= 0 then
       score = score + penaltyNotNeeded
+  else
+      -- Add the resource value to the score (inverse proportion)
+      score = score - (featureMetal + featureEnergy)
   end
 
   return score
 end
+
 
 
 
