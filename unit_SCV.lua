@@ -5,7 +5,7 @@ function widget:GetInfo()
     desc      = "RezBots Resurrect, Collect resources, and heal injured units. alt+c to open UI",
     author    = "Tumeden",
     date      = "2024",
-    version   = "v1.14",
+    version   = "v1.15",
     license   = "GNU GPL, v2 or later",
     layer     = 0,
     enabled   = true
@@ -868,8 +868,8 @@ local mapX, mapZ = Game.mapSizeX, Game.mapSizeZ
 local mapDiagonal = math.sqrt(mapX^2 + mapZ^2)
 
 function getDynamicWeightDistance(mapDiagonal)
-  local baseWeight = 1.5  -- Base weight for small maps
-  local scalingFactor = 0.5  -- Determines how much the map size influences weightDistance
+  local baseWeight = 1.2  -- Base weight for small maps
+  local scalingFactor = 2.5  -- Determines how much the map size influences weightDistance
   local maxMapDiagonal = 12000  -- Example: Diagonal of a large map for reference
 
   -- Increase weightDistance for larger maps
