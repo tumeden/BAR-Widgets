@@ -5,7 +5,7 @@ function widget:GetInfo()
     desc      = "RezBots Resurrect, Collect resources, and heal injured units. alt+c to open UI",
     author    = "Tumeden",
     date      = "2024",
-    version   = "v1.16",
+    version   = "v1.17",
     license   = "GNU GPL, v2 or later",
     layer     = 0,
     enabled   = true
@@ -841,9 +841,6 @@ end
   
 
 
-
-
-
 -- ///////////////////////////////////////////  assessResourceNeeds Function
 function assessResourceNeeds()
   local myTeamID = Spring.GetMyTeamID()
@@ -861,7 +858,6 @@ function assessResourceNeeds()
       return "energy"
   end
 end
-
 
 
 
@@ -888,6 +884,7 @@ end
 
 local dynamicWeightDistance = getDynamicWeightDistance(mapDiagonal)
 
+
 -- /////////////////////////////////////////// calculateResourceScore Function
 function calculateResourceScore(featureMetal, featureEnergy, distance, resourceNeed)
   local penaltyNotNeeded = 10000  -- Large penalty if the resource is not needed
@@ -904,8 +901,6 @@ function calculateResourceScore(featureMetal, featureEnergy, distance, resourceN
 
   return score
 end
-
-
 
 
 
@@ -942,8 +937,7 @@ function findReclaimableFeature(unitID, x, z, searchRadius, resourceNeed)
 end
 
 
-
-
+-- ///////////////////////////////////////////  performHealing Function
 -- Healing Function with Enhanced Logging
 function performHealing(unitID, unitData)
   scvlog("Attempting to heal with unit:", unitID)
@@ -976,7 +970,7 @@ end
 
 
 
-
+-- ///////////////////////////////////////////  performCollection Function
 -- Collection Function with Enhanced Logging
 function performCollection(unitID, unitData)
   scvlog("Attempting to collect with unit:", unitID)
@@ -1013,7 +1007,7 @@ end
 
 
 
-
+-- ///////////////////////////////////////////  performResurrection Function
 -- Resurrection Function with Maximum Units Per Feature Check
 function performResurrection(unitID, unitData)
   scvlog("Attempting to resurrect with unit:", unitID)
